@@ -18,6 +18,9 @@ const MAPPING = {
   'paperplane.fill': 'send',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
+  'barcode.viewfinder': 'qr-code-scanner',
+  'tray.and.arrow.up.fill': 'cloud-upload',
+  'list.bullet': 'format-list-bulleted',
 } as IconMapping;
 
 /**

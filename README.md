@@ -1,50 +1,57 @@
-# Welcome to your Expo app 👋
+# Zebra MC9300 scanner helper
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Приложение настроено под работу со встроенным сканером Zebra MC9300/MC930B через сервис DataWedge. Интерфейс состоит из трёх вкладок:
 
-## Get started
+- **Scan** — слушает DataWedge-интенты (`com.tslscaner.SCAN`), показывает статус, последнее чтение и даёт кнопки для Soft Scan Trigger. Для тестов на эмуляторе есть ручной ввод.
+- **List** — временное in-memory хранилище чтений (формат отображения `scan_dd_hh`). Записи можно очистить целиком или удалить долгим нажатием.
+- **Send** — собирает буфер в JSON, позволяет отправить его HTTP POST на произвольный endpoint или поделиться текстом через системный Share Sheet.
 
-1. Install dependencies
+## Настройка DataWedge
 
-   ```bash
-   npm install
-   ```
+1. На устройстве откройте **DataWedge → Profiles → Add new profile** и назовите профиль `TSLScanProfile`.
+2. В **Associated apps** добавьте пакет `com.tslscaner.app` (или оставьте `*`, чтобы профиль применялся ко всем Activity приложения).
+3. **Input plugin → Barcode input**: убедитесь, что профиль включён. При необходимости отрегулируйте декодеры (приложение активирует QR / EAN / Code128 / Code39 автоматически через API).
+4. **Output plugin → Intent**:
+   - Enabled: ON
+   - Intent action: `com.tslscaner.SCAN`
+   - Intent category: `android.intent.category.DEFAULT`
+   - Intent delivery: `Broadcast intent`
+5. Отключите **Keystroke output**, чтобы сканер не пытался вводить текст в поля.
 
-2. Start the app
+После этого физический триггер MC9300 начнёт кидать данные в приложение, а модуль [`react-native-datawedge-intents`](https://www.npmjs.com/package/react-native-datawedge-intents) перехватит интенты.
 
-   ```bash
-   npx expo start
-   ```
+> ℹ️ Библиотека нативная, поэтому запуск через Expo Go невозможен. Собирайте приложение как development build (`npx expo run:android`) или через EAS.
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Разработка
 
 ```bash
-npm run reset-project
+npm install
+npx expo prebuild --platform android   # один раз, чтобы связать native-модуль DataWedge
+npx expo run:android                   # запуск на устройстве Zebra / эмуляторе
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Веб и iOS-версии работают, но DataWedge там недоступен — используйте ручной ввод во вкладке Scan.
 
-## Learn more
+## Payload вкладки Send
 
-To learn more about developing your project with Expo, look at the following resources:
+Кнопка **Отправить JSON** выполняет POST на указанный URL с телом вида:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```json
+{
+  "device": { "id": "Zebra-9300", "app": "tslscaner" },
+  "comment": "смена А",
+  "total": 3,
+  "scans": [
+    {
+      "id": "1731829894000_ab12",
+      "code": "1234567890123",
+      "labelType": "LABEL-TYPE-CODE128",
+      "friendlyName": "scan_17_08",
+      "timestamp": "2025-11-17T12:31:34.000Z",
+      "source": "hardware"
+    }
+  ]
+}
+```
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Структуру можно поменять в `app/(tabs)/send.tsx` под собственный бэкенд.
