@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import React, {
   PropsWithChildren,
   createContext,
@@ -8,8 +10,6 @@ import React, {
   useState,
 } from 'react';
 import { DeviceEventEmitter, EmitterSubscription, Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
 
 const PROFILE_NAME = 'TSLScanProfile';
 const SCAN_INTENT_ACTION = 'com.tslscaner.SCAN';
@@ -360,10 +360,10 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
 
     if (secureAccess === 'missing_signature') {
       setStatus('error');
-      setError('DataWedge secure intent signature is not configured. Set EXPO_PUBLIC_DATAWEDGE_SIGNATURE or expo.extra.datawedgeSignature.');
+      setError('warn missing signature');
     } else if (secureAccess === 'denied') {
       setStatus('error');
-      setError('DataWedge denied secure intent registration. Approve this package & signature in DataWedge secure intent settings.');
+      setError('access for app denied');
     }
   }, [secureAccess]);
 
