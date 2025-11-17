@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import { DeviceEventEmitter, EmitterSubscription, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
 const PROFILE_NAME = 'TSLScanProfile';
@@ -15,6 +16,7 @@ const SCAN_INTENT_ACTION = 'com.tslscaner.SCAN';
 const DATAWEDGE_ACTION = 'com.symbol.datawedge.api.ACTION';
 const DATAWEDGE_RESULT_ACTION = 'com.symbol.datawedge.api.RESULT_ACTION';
 const REGISTER_FOR_USAGE_COMMAND = 'com.symbol.datawedge.api.REGISTER_FOR_USAGE';
+const STORAGE_KEY = 'tslscaner.scanItems.v1';
 
 type DataWedgeModule = {
   registerBroadcastReceiver: (config: {
@@ -92,6 +94,7 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
     Platform.OS === 'android' ? 'idle' : 'unsupported',
   );
   const [error, setError] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
 
   const packageName = useMemo(() => guessPackageName(), []);
   const expoExtras = (Constants.expoConfig?.extra ?? {}) as { datawedgeSignature?: string };
@@ -247,6 +250,46 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
       APP_SIGNATURE: datawedgeSignature,
     });
   }, [datawedgeSignature, packageName, sendCommand, signatureConfigured]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const hydrate = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        if (stored && !cancelled) {
+          const parsed = JSON.parse(stored) as ScanItem[];
+          if (Array.isArray(parsed)) {
+            setItems(parsed);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to hydrate scans', err);
+      } finally {
+        if (!cancelled) {
+          setHydrated(true);
+        }
+      }
+    };
+    hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const persist = async () => {
+      try {
+        const payload = JSON.stringify(
+          items.map(({ rawIntent, ...rest }) => rest),
+        );
+        await AsyncStorage.setItem(STORAGE_KEY, payload);
+      } catch (err) {
+        console.warn('Failed to persist scans', err);
+      }
+    };
+    persist();
+  }, [hydrated, items]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') {
