@@ -18,7 +18,7 @@ export default function SendScreen() {
   const payload = useMemo(
     () => ({
       device: {
-        id: Constants.deviceName ?? 'Unknown Zebra',
+        id: Constants.deviceName ?? 'Nieznana Zebra',
         app: Constants.expoConfig?.name ?? 'tslscaner',
       },
       comment: comment || undefined,
@@ -37,7 +37,7 @@ export default function SendScreen() {
 
   const sendToEndpoint = async () => {
     if (!endpoint.trim().length) {
-      Alert.alert('Нужно указать URL', 'Введите endpoint, куда отправлять JSON.');
+      Alert.alert('Wymagany adres URL', 'Podaj endpoint, na który wyślemy JSON.');
       return;
     }
 
@@ -51,14 +51,14 @@ export default function SendScreen() {
       });
 
       if (!response.ok) {
-        throw new Error(`Сервер ответил: ${response.status}`);
+        throw new Error(`Serwer zwrócił: ${response.status}`);
       }
 
       setState('success');
-      setLastMessage('Отправлено успешно');
+      setLastMessage('Wysłano pomyślnie');
     } catch (err) {
       setState('error');
-      setLastMessage((err as Error)?.message ?? 'Ошибка');
+      setLastMessage((err as Error)?.message ?? 'Błąd');
     }
   };
 
@@ -67,20 +67,20 @@ export default function SendScreen() {
     setLastMessage('');
     await Share.share({
       message: JSON.stringify(payload, null, 2),
-      title: 'Экспорт сканов',
+      title: 'Eksport skanów',
     });
   };
 
   return (
     <ThemedView style={styles.container}>
-      <ThemedText type="title">Send</ThemedText>
+      <ThemedText type="title">Wysyłka</ThemedText>
       <ThemedText style={styles.helper}>
-        Сформирован временный буфер из {itemsCount} сканов. Его можно выгрузить через HTTP POST или
-        поделиться напрямую (Telegram, почта и т.п.).
+        Zebrano tymczasowy bufor z {itemsCount} skanów. Możesz wysłać go przez HTTP POST lub
+        udostępnić dalej (Telegram, e-mail itd.).
       </ThemedText>
 
       <Card>
-        <ThemedText type="subtitle">Endpoint</ThemedText>
+        <ThemedText type="subtitle">Endpoint HTTP</ThemedText>
         <TextInput
           value={endpoint}
           onChangeText={setEndpoint}
@@ -90,11 +90,11 @@ export default function SendScreen() {
           keyboardType="url"
           style={styles.input}
         />
-        <ThemedText style={styles.fieldLabel}>Комментарий</ThemedText>
+        <ThemedText style={styles.fieldLabel}>Komentarz</ThemedText>
         <TextInput
           value={comment}
           onChangeText={setComment}
-          placeholder="Например: смена А, 2 паллеты"
+          placeholder="Np.: zmiana A, 2 palety"
           style={styles.input}
         />
         <Pressable
@@ -102,11 +102,11 @@ export default function SendScreen() {
           disabled={state === 'sending'}
           onPress={sendToEndpoint}>
           <ThemedText style={styles.buttonText}>
-            {state === 'sending' ? 'Отправка…' : 'Отправить JSON'}
+            {state === 'sending' ? 'Wysyłanie...' : 'Wyślij JSON'}
           </ThemedText>
         </Pressable>
         <Pressable style={styles.secondaryButton} onPress={sharePayload}>
-          <ThemedText style={styles.secondaryButtonText}>Поделиться</ThemedText>
+          <ThemedText style={styles.secondaryButtonText}>Udostępnij</ThemedText>
         </Pressable>
         {lastMessage.length > 0 && (
           <ThemedText
@@ -117,7 +117,7 @@ export default function SendScreen() {
       </Card>
 
       <Card>
-        <ThemedText type="subtitle">Что отправляется</ThemedText>
+        <ThemedText type="subtitle">Zawartość wysyłki</ThemedText>
         <ThemedText style={styles.sampleText} numberOfLines={8}>
           {JSON.stringify(payload, null, 2)}
         </ThemedText>

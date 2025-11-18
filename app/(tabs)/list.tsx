@@ -10,16 +10,16 @@ export default function ListScreen() {
 
   const handleClear = () => {
     if (!itemsCount) return;
-    Alert.alert('Очистить список', 'Удалить все временные сканы?', [
-      { text: 'Отмена', style: 'cancel' },
-      { text: 'Очистить', style: 'destructive', onPress: clearAll },
+    Alert.alert('Wyczyścić listę', 'Usunąć wszystkie tymczasowe skany?', [
+      { text: 'Anuluj', style: 'cancel' },
+      { text: 'Wyczyść', style: 'destructive', onPress: clearAll },
     ]);
   };
 
   return (
     <ThemedView style={styles.container}>
       <View style={styles.header}>
-        <ThemedText type="title">List</ThemedText>
+        <ThemedText type="title">Lista</ThemedText>
         <View style={styles.counter}>
           <ThemedText style={styles.counterText}>{itemsCount}</ThemedText>
         </View>
@@ -29,7 +29,7 @@ export default function ListScreen() {
           onPress={handleClear}
           disabled={!itemsCount}
           style={[styles.clearButton, !itemsCount && styles.clearButtonDisabled]}>
-          <ThemedText style={styles.clearButtonText}>Очистить</ThemedText>
+          <ThemedText style={styles.clearButtonText}>Wyczyść</ThemedText>
         </Pressable>
       </View>
       <FlatList
@@ -47,14 +47,14 @@ export default function ListScreen() {
               </ThemedText>
               <ThemedText style={styles.rowCode}>{item.code}</ThemedText>
               <ThemedText style={styles.rowMeta}>
-                {item.labelType ?? 'формат ?'} · {item.source === 'manual' ? 'ручной' : 'сканер'}
+                Format: {item.labelType ?? 'nieznany'}
               </ThemedText>
             </RowCard>
           </Pressable>
         )}
         ListEmptyComponent={
           <ThemedText style={styles.emptyText}>
-            Нет записей. Перейдите на вкладку Scan и отсканируйте штрихкод.
+            Brak wpisów. Przejdź do zakładki Skaner i zeskanuj kod.
           </ThemedText>
         }
       />

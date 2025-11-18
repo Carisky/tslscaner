@@ -29,7 +29,7 @@ type DataWedgeModule = {
 const dataWedgeModule: DataWedgeModule | null =
   Platform.OS === 'android' ? require('react-native-datawedge-intents') : null;
 
-type ScanSource = 'hardware' | 'manual';
+type ScanSource = 'hardware';
 
 type SecureAccessState = 'unknown' | 'missing_signature' | 'registering' | 'granted' | 'denied';
 
@@ -40,7 +40,6 @@ type ScanContextValue = {
   status: ScanStatus;
   error: string | null;
   lastScan: ScanItem | null;
-  addManualScan: (code: string, labelType?: string) => void;
   removeById: (id: string) => void;
   clearAll: () => void;
   softTrigger: (mode?: 'start' | 'stop' | 'toggle') => void;
@@ -62,7 +61,6 @@ const defaultContext: ScanContextValue = {
   status: Platform.OS === 'android' ? 'idle' : 'unsupported',
   error: null,
   lastScan: null,
-  addManualScan: () => undefined,
   removeById: () => undefined,
   clearAll: () => undefined,
   softTrigger: () => undefined,
@@ -183,7 +181,7 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
         extras,
       });
     } catch (err) {
-      setError((prev) => prev ?? (err as Error)?.message ?? 'Failed to communicate with DataWedge');
+      setError((prev) => prev ?? (err as Error)?.message ?? 'Nie udało się nawiązać komunikacji z DataWedge');
       setStatus('error');
     }
   }, []);
@@ -298,7 +296,7 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
 
     if (!dataWedgeModule) {
       setStatus('error');
-      setError('DataWedge runtime is not available. Ensure react-native-datawedge-intents is installed on Android.');
+      setError('Środowisko DataWedge jest niedostępne. Upewnij się, że react-native-datawedge-intents jest zainstalowany na Androidzie.');
       return;
     }
 
@@ -316,7 +314,7 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
       ];
     } catch (err) {
       setStatus('error');
-      setError((err as Error)?.message ?? 'Failed to register broadcast receiver for DataWedge');
+      setError((err as Error)?.message ?? 'Nie udało się zarejestrować odbiornika DataWedge');
     }
 
     return () => {
@@ -360,27 +358,12 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
 
     if (secureAccess === 'missing_signature') {
       setStatus('error');
-      setError('warn missing signature');
+      setError('Brakuje podpisu DataWedge');
     } else if (secureAccess === 'denied') {
       setStatus('error');
-      setError('access for app denied');
+      setError('Odmowa dostępu dla aplikacji');
     }
   }, [secureAccess]);
-
-  const addManualScan = useCallback(
-    (code: string, labelType?: string) => {
-      const trimmed = code.trim();
-      if (!trimmed.length) {
-        return;
-      }
-      pushScan({
-        code: trimmed,
-        labelType,
-        source: 'manual',
-      });
-    },
-    [pushScan],
-  );
 
   const removeById = useCallback((id: string) => {
     setItems((prev) => prev.filter((scan) => scan.id !== id));
@@ -409,13 +392,12 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
       lastScan: items.length ? items[0] : null,
       status,
       error,
-      addManualScan,
       removeById,
       clearAll,
       softTrigger,
       itemsCount: items.length,
     }),
-    [addManualScan, clearAll, error, items, removeById, softTrigger, status],
+    [clearAll, error, items, removeById, softTrigger, status],
   );
 
   return <ScanContext.Provider value={value}>{children}</ScanContext.Provider>;

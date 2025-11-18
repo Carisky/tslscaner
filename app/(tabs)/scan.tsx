@@ -1,28 +1,19 @@
-import { PropsWithChildren, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { PropsWithChildren } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useScanSession } from '@/providers/scan-provider';
 
 const statusTextMap: Record<string, string> = {
-  idle: 'Инициализация слушателя DataWedge…',
-  listening: 'Сканер готов принимать данные',
-  unsupported: 'Поддерживается только на Android / Zebra',
-  error: 'Ошибка связи с DataWedge',
+  idle: 'Inicjalizowanie nasłuchiwania DataWedge...',
+  listening: 'Skaner gotowy do pracy',
+  unsupported: 'Obsługiwane tylko na Android / Zebra',
+  error: 'Błąd komunikacji z DataWedge',
 };
 
 export default function ScanScreen() {
-  const { status, error, lastScan, addManualScan, softTrigger } = useScanSession();
-  const [manualValue, setManualValue] = useState('');
-
-  const disableManualAdd = !manualValue.trim().length;
-
-  const handleManualAdd = () => {
-    if (disableManualAdd) return;
-    addManualScan(manualValue);
-    setManualValue('');
-  };
+  const { status, error, lastScan, softTrigger } = useScanSession();
 
   const friendlyStatus = statusTextMap[status] ?? status;
 
@@ -30,18 +21,18 @@ export default function ScanScreen() {
     <ThemedView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Card>
-          <ThemedText type="title">Scan</ThemedText>
+          <ThemedText type="title">Skaner</ThemedText>
           <ThemedText style={styles.status}>{friendlyStatus}</ThemedText>
           {error && <ThemedText style={styles.error}>{error}</ThemedText>}
           <ThemedText style={styles.helper}>
-            Убедись, что профиль DataWedge активен и привязан к действию{' '}
-            <ThemedText type="defaultSemiBold">com.tslscaner.SCAN</ThemedText>. Нажмите
-            аппаратный триггер или кнопки ниже, чтобы получить чтение QR/Bar.
+            Upewnij się, że profil DataWedge jest aktywny i przypisany do działania{' '}
+            <ThemedText type="defaultSemiBold">com.tslscaner.SCAN</ThemedText>. Wciśnij
+            sprzętowy spust albo użyj przycisków poniżej, aby odebrać kod QR/Bar.
           </ThemedText>
         </Card>
 
         <Card>
-          <ThemedText type="subtitle">Последнее чтение</ThemedText>
+          <ThemedText type="subtitle">Ostatni odczyt</ThemedText>
           {lastScan ? (
             <View style={styles.lastScan}>
               <ThemedText style={styles.scanValue}>{lastScan.code}</ThemedText>
@@ -49,44 +40,25 @@ export default function ScanScreen() {
                 {lastScan.friendlyName} · {new Date(lastScan.timestamp).toLocaleTimeString()}
               </ThemedText>
               <ThemedText style={styles.scanMeta}>
-                Формат: {lastScan.labelType ?? 'неизвестно'}
+                Format: {lastScan.labelType ?? 'brak danych'}
               </ThemedText>
             </View>
           ) : (
-            <ThemedText>Список сканов пока пуст.</ThemedText>
+            <ThemedText>Brak zarejestrowanych skanów.</ThemedText>
           )}
         </Card>
 
         <Card>
-          <ThemedText type="subtitle">Управление триггером</ThemedText>
+          <ThemedText type="subtitle">Sterowanie skanerem</ThemedText>
           <View style={styles.buttonRow}>
-            <ActionButton label="Старт" onPress={() => softTrigger('start')} />
-            <ActionButton label="Стоп" onPress={() => softTrigger('stop')} />
-            <ActionButton label="Toggle" onPress={() => softTrigger('toggle')} />
+            <ActionButton label="Start" onPress={() => softTrigger('start')} />
+            <ActionButton label="Stop" onPress={() => softTrigger('stop')} />
+            <ActionButton label="Przełącz" onPress={() => softTrigger('toggle')} />
           </View>
           <ThemedText style={styles.helper}>
-            Эти команды используют DataWedge Soft Scan Trigger. Основной способ работы — физическая
-            кнопка на Zebra MC9300.
+            Polecenia korzystają z DataWedge Soft Scan Trigger. Docelowo używaj fizycznego
+            przycisku w Zebra MC9300.
           </ThemedText>
-        </Card>
-
-        <Card>
-          <ThemedText type="subtitle">Ручной ввод (для теста)</ThemedText>
-          <TextInput
-            value={manualValue}
-            onChangeText={setManualValue}
-            placeholder="Вставьте код, чтобы эмулировать скан"
-            style={styles.input}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={status !== 'unsupported'}
-          />
-          <ActionButton label="Добавить" disabled={disableManualAdd} onPress={handleManualAdd} />
-          {Platform.OS !== 'android' && (
-            <ThemedText style={styles.helper}>
-              На эмуляторах и iOS данные можно заносить только вручную.
-            </ThemedText>
-          )}
         </Card>
       </ScrollView>
     </ThemedView>
@@ -170,13 +142,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontWeight: '600',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 12,
   },
 });
 
