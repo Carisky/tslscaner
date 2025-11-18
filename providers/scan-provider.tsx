@@ -310,7 +310,6 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
 
       subscriptions = [
         DeviceEventEmitter.addListener('datawedge_broadcast_intent', handleIntent),
-        DeviceEventEmitter.addListener('barcode_scan', handleIntent),
       ];
     } catch (err) {
       setStatus('error');
