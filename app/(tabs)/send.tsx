@@ -1,19 +1,54 @@
 import Constants from 'expo-constants';
 import { PropsWithChildren, useMemo, useState } from 'react';
-import { Alert, Pressable, Share, StyleSheet, TextInput } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  TextInput,
+} from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import type { ScanItem } from '@/providers/scan-provider';
 import { useScanSession } from '@/providers/scan-provider';
+import { useSettings } from '@/providers/settings-provider';
 
 type SendState = 'idle' | 'sending' | 'success' | 'error';
+const CHUNK_SIZE = 20;
+
+const toPayloadScan = (scan: ScanItem) => ({
+  id: scan.id,
+  code: scan.code,
+  labelType: scan.labelType,
+  friendlyName: scan.friendlyName,
+  timestamp: scan.timestamp,
+  source: scan.source,
+});
+
+const buildEndpoint = (rawUrl: string) => {
+  const trimmed = rawUrl.trim();
+  if (!trimmed.length) {
+    return '';
+  }
+  const withoutTrailers = trimmed.replace(/\/+$/, '');
+  if (/\/api\/scans$/i.test(withoutTrailers)) {
+    return withoutTrailers;
+  }
+  return `${withoutTrailers}/api/scans`;
+};
 
 export default function SendScreen() {
   const { items, itemsCount } = useScanSession();
-  const [endpoint, setEndpoint] = useState('');
+  const { serverBaseUrl } = useSettings();
   const [comment, setComment] = useState('');
   const [state, setState] = useState<SendState>('idle');
   const [lastMessage, setLastMessage] = useState('');
+
+  const resolvedEndpoint = useMemo(() => buildEndpoint(serverBaseUrl), [serverBaseUrl]);
 
   const payload = useMemo(
     () => ({
@@ -23,42 +58,67 @@ export default function SendScreen() {
       },
       comment: comment || undefined,
       total: itemsCount,
-      scans: items.map((scan) => ({
-        id: scan.id,
-        code: scan.code,
-        labelType: scan.labelType,
-        friendlyName: scan.friendlyName,
-        timestamp: scan.timestamp,
-        source: scan.source,
-      })),
+      scans: items.map(toPayloadScan),
     }),
     [comment, items, itemsCount],
   );
 
   const sendToEndpoint = async () => {
-    if (!endpoint.trim().length) {
-      Alert.alert('Wymagany adres URL', 'Podaj endpoint, na który wyślemy JSON.');
+    if (!resolvedEndpoint.length) {
+      Alert.alert('Brak serwera', 'Najpierw ustaw bazowy adres w zakladce Ustawienia.');
+      return;
+    }
+    if (items.length === 0) {
+      Alert.alert('Brak danych', 'Dodaj przynajmniej jeden skan.');
       return;
     }
 
     setState('sending');
     setLastMessage('');
     try {
-      const response = await fetch(endpoint.trim(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const batches: ScanItem[][] = [];
+      for (let idx = 0; idx < items.length; idx += CHUNK_SIZE) {
+        batches.push(items.slice(idx, idx + CHUNK_SIZE));
+      }
 
-      if (!response.ok) {
-        throw new Error(`Serwer zwrócił: ${response.status}`);
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+        console.log(
+          `Sending batch ${batchIndex + 1}/${batches.length} to ${resolvedEndpoint}`,
+        );
+        const chunkPayload = {
+          device: payload.device,
+          comment: payload.comment,
+          total: itemsCount,
+          scans: batches[batchIndex].map(toPayloadScan),
+        };
+        const response = await fetch(resolvedEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(chunkPayload),
+        });
+
+        if (!response.ok) {
+          const responseText = await response.text();
+          const details =
+            responseText && responseText.length ? ` | tresc: ${responseText}` : '';
+          throw new Error(
+            `Serwer zwrocil ${response.status} (partia ${batchIndex + 1}/${
+              batches.length
+            })${details}`,
+          );
+        }
       }
 
       setState('success');
-      setLastMessage('Wysłano pomyślnie');
+      setLastMessage(
+        `Wyslano ${itemsCount} skanow w ${batches.length} zadaniach na ${resolvedEndpoint}`,
+      );
+      Alert.alert('Sukces', 'Dane wyslano na serwer.');
     } catch (err) {
       setState('error');
-      setLastMessage((err as Error)?.message ?? 'Błąd');
+      const message = (err as Error)?.message ?? 'Blad';
+      setLastMessage(message);
+      Alert.alert('Blad wysylki', message);
     }
   };
 
@@ -67,69 +127,87 @@ export default function SendScreen() {
     setLastMessage('');
     await Share.share({
       message: JSON.stringify(payload, null, 2),
-      title: 'Eksport skanów',
+      title: 'Eksport skanow',
     });
   };
 
   return (
-    <ThemedView style={styles.container}>
-      <ThemedText type="title">Wysyłka</ThemedText>
-      <ThemedText style={styles.helper}>
-        Zebrano tymczasowy bufor z {itemsCount} skanów. Możesz wysłać go przez HTTP POST lub
-        udostępnić dalej (Telegram, e-mail itd.).
-      </ThemedText>
-
-      <Card>
-        <ThemedText type="subtitle">Endpoint HTTP</ThemedText>
-        <TextInput
-          value={endpoint}
-          onChangeText={setEndpoint}
-          placeholder="https://example.org/api/scans"
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          style={styles.input}
-        />
-        <ThemedText style={styles.fieldLabel}>Komentarz</ThemedText>
-        <TextInput
-          value={comment}
-          onChangeText={setComment}
-          placeholder="Np.: zmiana A, 2 palety"
-          style={styles.input}
-        />
-        <Pressable
-          style={[styles.button, state === 'sending' && styles.buttonDisabled]}
-          disabled={state === 'sending'}
-          onPress={sendToEndpoint}>
-          <ThemedText style={styles.buttonText}>
-            {state === 'sending' ? 'Wysyłanie...' : 'Wyślij JSON'}
+    <ThemedView style={styles.screen}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={64}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          <ThemedText type="title">Wysylka</ThemedText>
+          <ThemedText style={styles.helper}>
+            Tymczasowy bufor zawiera {itemsCount} skanow. Mozesz wyslac je POST-em albo udostepnic
+            dalej.
           </ThemedText>
-        </Pressable>
-        <Pressable style={styles.secondaryButton} onPress={sharePayload}>
-          <ThemedText style={styles.secondaryButtonText}>Udostępnij</ThemedText>
-        </Pressable>
-        {lastMessage.length > 0 && (
-          <ThemedText
-            style={[styles.statusText, state === 'error' ? styles.error : styles.success]}>
-            {lastMessage}
-          </ThemedText>
-        )}
-      </Card>
 
-      <Card>
-        <ThemedText type="subtitle">Zawartość wysyłki</ThemedText>
-        <ThemedText style={styles.sampleText} numberOfLines={8}>
-          {JSON.stringify(payload, null, 2)}
-        </ThemedText>
-      </Card>
+          <Card>
+            <ThemedText type="subtitle">Cel wysylki</ThemedText>
+            <ThemedText style={styles.helper}>
+              {resolvedEndpoint.length
+                ? `Wyslemy na ${resolvedEndpoint} po ${CHUNK_SIZE} skanow w jednym zadaniu.`
+                : 'Brak skonfigurowanego serwera. Ustaw go w zakladce Ustawienia.'}
+            </ThemedText>
+            <ThemedText style={styles.fieldLabel}>Komentarz</ThemedText>
+            <TextInput
+              value={comment}
+              onChangeText={setComment}
+              placeholder="Np.: zmiana A, 2 palety"
+              style={styles.input}
+              multiline
+              numberOfLines={3}
+            />
+            <Pressable
+              style={[
+                styles.button,
+                (state === 'sending' || !resolvedEndpoint.length) && styles.buttonDisabled,
+              ]}
+              disabled={state === 'sending' || !resolvedEndpoint.length}
+              onPress={sendToEndpoint}>
+              <ThemedText style={styles.buttonText}>
+                {state === 'sending' ? 'Wysylanie...' : 'Wyslij JSON'}
+              </ThemedText>
+            </Pressable>
+            <Pressable style={styles.secondaryButton} onPress={sharePayload}>
+              <ThemedText style={styles.secondaryButtonText}>Udostepnij</ThemedText>
+            </Pressable>
+            {lastMessage.length > 0 && (
+              <ThemedText
+                style={[styles.statusText, state === 'error' ? styles.error : styles.success]}>
+                {lastMessage}
+              </ThemedText>
+            )}
+          </Card>
+
+          <Card>
+            <ThemedText type="subtitle">Podglad JSON</ThemedText>
+            <ThemedText style={styles.sampleText} numberOfLines={8}>
+              {JSON.stringify(payload, null, 2)}
+            </ThemedText>
+          </Card>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
+  },
+  flex: {
+    flex: 1,
+  },
+  content: {
     padding: 16,
+    paddingBottom: 48,
+    gap: 16,
   },
   helper: {
     marginTop: 8,
