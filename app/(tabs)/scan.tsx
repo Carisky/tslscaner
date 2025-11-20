@@ -1,5 +1,5 @@
 import { PropsWithChildren } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -13,7 +13,7 @@ const statusTextMap: Record<string, string> = {
 };
 
 export default function ScanScreen() {
-  const { status, error, lastScan, softTrigger } = useScanSession();
+  const { status, error, lastScan } = useScanSession();
 
   const friendlyStatus = statusTextMap[status] ?? status;
 
@@ -49,12 +49,6 @@ export default function ScanScreen() {
         </Card>
 
         <Card>
-          <ThemedText type="subtitle">Sterowanie skanerem</ThemedText>
-          <View style={styles.buttonRow}>
-            <ActionButton label="Start" onPress={() => softTrigger('start')} />
-            <ActionButton label="Stop" onPress={() => softTrigger('stop')} />
-            <ActionButton label="Przełącz" onPress={() => softTrigger('toggle')} />
-          </View>
           <ThemedText style={styles.helper}>
             Polecenia korzystają z DataWedge Soft Scan Trigger. Docelowo używaj fizycznego
             przycisku w Zebra MC9300.
@@ -64,26 +58,6 @@ export default function ScanScreen() {
     </ThemedView>
   );
 }
-
-const ActionButton = ({
-  label,
-  onPress,
-  disabled,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-}) => (
-  <Pressable
-    disabled={disabled}
-    onPress={onPress}
-    style={[
-      styles.button,
-      disabled && { opacity: 0.5 },
-    ]}>
-    <ThemedText style={styles.buttonText}>{label}</ThemedText>
-  </Pressable>
-);
 
 const styles = StyleSheet.create({
   container: {

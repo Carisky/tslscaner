@@ -16,6 +16,17 @@ export default function ListScreen() {
     ]);
   };
 
+  const handleRemoveItem = (id: string) => {
+    Alert.alert('Usunąć skan', 'Na pewno chcesz usunąć ten skan?', [
+      { text: 'Anuluj', style: 'cancel' },
+      {
+        text: 'Usuń',
+        style: 'destructive',
+        onPress: () => removeById(id),
+      },
+    ]);
+  };
+
   return (
     <ThemedView style={styles.container}>
       <View style={styles.header}>
@@ -38,7 +49,7 @@ export default function ListScreen() {
         contentContainerStyle={[styles.listContent, !itemsCount && styles.emptyList]}
         renderItem={({ item }) => (
           <Pressable
-            onLongPress={() => removeById(item.id)}
+            onLongPress={() => handleRemoveItem(item.id)}
             style={({ pressed }) => [styles.rowPressable, pressed && styles.rowPressed]}>
             <RowCard>
               <ThemedText type="defaultSemiBold">{item.friendlyName}</ThemedText>

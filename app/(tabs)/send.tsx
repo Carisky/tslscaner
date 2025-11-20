@@ -184,13 +184,6 @@ export default function SendScreen() {
               </ThemedText>
             )}
           </Card>
-
-          <Card>
-            <ThemedText type="subtitle">Podglad JSON</ThemedText>
-            <ThemedText style={styles.sampleText} numberOfLines={8}>
-              {JSON.stringify(payload, null, 2)}
-            </ThemedText>
-          </Card>
         </ScrollView>
       </KeyboardAvoidingView>
     </ThemedView>

@@ -43,10 +43,8 @@ export default function SettingsScreen() {
           showsVerticalScrollIndicator={false}>
           <ThemedText type="title">Ustawienia</ThemedText>
           <ThemedText style={styles.helper}>
-            Skonfiguruj bazowy adres serwera. Mozesz podac sam host lub caly URL
-            <ThemedText type="defaultSemiBold"> https://example.org/api/scans</ThemedText>. Zakladka
-            Wysylka automatycznie doda sciezke{' '}
-            <ThemedText type="defaultSemiBold">/api/scans</ThemedText>.
+            Skonfiguruj bazowy adres serwera.
+            <ThemedText type="defaultSemiBold"> https://example.org/api/scans</ThemedText>
           </ThemedText>
 
           <Card>
@@ -62,12 +60,7 @@ export default function SettingsScreen() {
             />
             <ThemedText style={styles.helper}>
               Przyklad: wklej{' '}
-              <ThemedText type="defaultSemiBold">https://rotten-wasps-buy.loca.lt</ThemedText> lub caly
-              <ThemedText type="defaultSemiBold">
-                {' '}
-                https://rotten-wasps-buy.loca.lt/api/scans
-              </ThemedText>
-              . Aplikacja rozpozna format.
+              <ThemedText type="defaultSemiBold">https://rotten-wasps-buy.loca.lt</ThemedText>
             </ThemedText>
             <Pressable
               onPress={saveBaseUrl}
