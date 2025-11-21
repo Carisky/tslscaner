@@ -146,17 +146,13 @@ export default function SendScreen() {
           showsVerticalScrollIndicator={false}>
           <ThemedText type="title">Wysylka</ThemedText>
           <ThemedText style={styles.helper}>
-            Tymczasowy bufor zawiera {itemsCount} skanow. Mozesz wyslac je POST-em albo udostepnic
+            Tymczasowy bufor zawiera {itemsCount} skanow. Mozesz wyslac je na server albo udostepnic
             dalej.
           </ThemedText>
 
           <Card>
             <ThemedText type="subtitle">Cel wysylki</ThemedText>
-            <ThemedText style={styles.helper}>
-              {resolvedEndpoint.length
-                ? `Wyslemy na ${resolvedEndpoint} po ${CHUNK_SIZE} skanow w jednym zadaniu.`
-                : 'Brak skonfigurowanego serwera. Ustaw go w zakladce Ustawienia.'}
-            </ThemedText>
+
             <ThemedText style={styles.fieldLabel}>Prisma (opcjonalnie)</ThemedText>
             <TextInput
               value={prisma}
@@ -181,7 +177,7 @@ export default function SendScreen() {
               disabled={state === 'sending' || !resolvedEndpoint.length}
               onPress={sendToEndpoint}>
               <ThemedText style={styles.buttonText}>
-                {state === 'sending' ? 'Wysylanie...' : 'Wyslij JSON'}
+                {state === 'sending' ? 'Wysylanie...' : 'Wyslij'}
               </ThemedText>
             </Pressable>
             <Pressable style={styles.secondaryButton} onPress={sharePayload}>
