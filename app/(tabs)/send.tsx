@@ -45,6 +45,7 @@ export default function SendScreen() {
   const { items, itemsCount } = useScanSession();
   const { serverBaseUrl } = useSettings();
   const [comment, setComment] = useState('');
+  const [prisma, setPrisma] = useState('');
   const [state, setState] = useState<SendState>('idle');
   const [lastMessage, setLastMessage] = useState('');
 
@@ -57,10 +58,11 @@ export default function SendScreen() {
         app: Constants.expoConfig?.name ?? 'tslscaner',
       },
       comment: comment || undefined,
+      prisma: prisma || undefined,
       total: itemsCount,
       scans: items.map(toPayloadScan),
     }),
-    [comment, items, itemsCount],
+    [comment, items, itemsCount, prisma],
   );
 
   const sendToEndpoint = async () => {
@@ -88,6 +90,7 @@ export default function SendScreen() {
         const chunkPayload = {
           device: payload.device,
           comment: payload.comment,
+          prisma: payload.prisma,
           total: itemsCount,
           scans: batches[batchIndex].map(toPayloadScan),
         };
@@ -154,6 +157,13 @@ export default function SendScreen() {
                 ? `Wyslemy na ${resolvedEndpoint} po ${CHUNK_SIZE} skanow w jednym zadaniu.`
                 : 'Brak skonfigurowanego serwera. Ustaw go w zakladce Ustawienia.'}
             </ThemedText>
+            <ThemedText style={styles.fieldLabel}>Prisma (opcjonalnie)</ThemedText>
+            <TextInput
+              value={prisma}
+              onChangeText={setPrisma}
+              placeholder="Prisma"
+              style={styles.input}
+            />
             <ThemedText style={styles.fieldLabel}>Komentarz</ThemedText>
             <TextInput
               value={comment}
