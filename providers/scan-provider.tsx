@@ -37,6 +37,7 @@ type ScanStatus = 'idle' | 'listening' | 'unsupported' | 'error';
 
 type ScanContextValue = {
   items: ScanItem[];
+  folders: ScanFolder[];
   status: ScanStatus;
   error: string | null;
   lastScan: ScanItem | null;
@@ -44,6 +45,13 @@ type ScanContextValue = {
   clearAll: () => void;
   softTrigger: (mode?: 'start' | 'stop' | 'toggle') => void;
   itemsCount: number;
+  createFolder: (name: string) => ScanFolder | null;
+  renameFolder: (folderId: string, name: string) => void;
+  deleteFolder: (folderId: string) => void;
+  moveScanToFolder: (folderId: string, scan: ScanItem) => void;
+  clearFolder: (folderId: string) => void;
+  removeFolderScan: (folderId: string, scanId: string) => void;
+  moveBufferToFolder: (folderId: string) => void;
 };
 
 export type ScanItem = {
@@ -56,8 +64,32 @@ export type ScanItem = {
   rawIntent?: Record<string, unknown>;
 };
 
+export type ScanFolder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  scans: ScanItem[];
+};
+
+type PersistentScanItem = Omit<ScanItem, 'rawIntent'>;
+
+type PersistedFolder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  scans: PersistentScanItem[];
+};
+
+type PersistedState = {
+  buffer: PersistentScanItem[];
+  folders: PersistedFolder[];
+};
+
 const defaultContext: ScanContextValue = {
   items: [],
+  folders: [],
   status: Platform.OS === 'android' ? 'idle' : 'unsupported',
   error: null,
   lastScan: null,
@@ -65,12 +97,69 @@ const defaultContext: ScanContextValue = {
   clearAll: () => undefined,
   softTrigger: () => undefined,
   itemsCount: 0,
+  createFolder: () => null,
+  renameFolder: () => undefined,
+  deleteFolder: () => undefined,
+  moveScanToFolder: () => undefined,
+  clearFolder: () => undefined,
+  removeFolderScan: () => undefined,
+  moveBufferToFolder: () => undefined,
 };
 
 const ScanContext = createContext<ScanContextValue>(defaultContext);
 
 const pad = (input: number) => input.toString().padStart(2, '0');
 const buildFriendlyName = (date: Date) => `scan_${pad(date.getDate())}_${pad(date.getHours())}`;
+const buildFolderId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+const isPersistentScanItem = (value: unknown): value is PersistentScanItem => {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.id === 'string' &&
+    typeof entry.code === 'string' &&
+    typeof entry.timestamp === 'string' &&
+    typeof entry.friendlyName === 'string'
+  );
+};
+
+const hydratePersistentScans = (value: unknown): ScanItem[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isPersistentScanItem).map((scan) => ({ ...scan }));
+};
+
+const hydratePersistentFolders = (value: unknown): ScanFolder[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((folder) => {
+      if (typeof folder !== 'object' || folder === null) {
+        return null;
+      }
+      const entry = folder as PersistedFolder & { name?: string };
+      if (
+        typeof entry.id !== 'string' ||
+        typeof entry.name !== 'string' ||
+        typeof entry.createdAt !== 'string' ||
+        typeof entry.updatedAt !== 'string'
+      ) {
+        return null;
+      }
+      return {
+        id: entry.id,
+        name: entry.name,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        scans: hydratePersistentScans(entry.scans),
+      };
+    })
+    .filter((folder): folder is ScanFolder => folder !== null);
+};
 
 const readStringExtra = (intent: Record<string, unknown>, key: string) => {
   const value = intent[key];
@@ -277,6 +366,7 @@ const normalizeScannedValue = (intent: Record<string, unknown>, fallback: string
 
 export const ScanProvider = ({ children }: PropsWithChildren) => {
   const [items, setItems] = useState<ScanItem[]>([]);
+  const [folders, setFolders] = useState<ScanFolder[]>([]);
   const [status, setStatus] = useState<ScanStatus>(
     Platform.OS === 'android' ? 'idle' : 'unsupported',
   );
@@ -311,6 +401,94 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
       friendlyName: buildFriendlyName(now),
     };
     setItems((prev) => [item, ...prev]);
+  }, []);
+
+  const createFolder = useCallback((name: string) => {
+    const trimmed = name.trim();
+    const folderName = trimmed.length ? trimmed : `Folder ${new Date().toLocaleDateString()}`;
+    const timestamp = new Date().toISOString();
+    const newFolder: ScanFolder = {
+      id: buildFolderId(),
+      name: folderName,
+      scans: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    setFolders((prev) => [newFolder, ...prev]);
+    return newFolder;
+  }, []);
+
+  const renameFolder = useCallback((id: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return;
+    }
+    setFolders((prev) =>
+      prev.map((folder) =>
+        folder.id === id
+          ? { ...folder, name: trimmed, updatedAt: new Date().toISOString() }
+          : folder,
+      ),
+    );
+  }, []);
+
+  const deleteFolder = useCallback((id: string) => {
+    setFolders((prev) => prev.filter((folder) => folder.id !== id));
+  }, []);
+
+  const clearFolder = useCallback((id: string) => {
+    setFolders((prev) =>
+      prev.map((folder) =>
+        folder.id === id
+          ? { ...folder, scans: [], updatedAt: new Date().toISOString() }
+          : folder,
+      ),
+    );
+  }, []);
+
+  const moveScanToFolder = useCallback((folderId: string, scan: ScanItem) => {
+    setItems((prev) => prev.filter((item) => item.id !== scan.id));
+    setFolders((prev) =>
+      prev.map((folder) =>
+        folder.id === folderId
+          ? { ...folder, scans: [scan, ...folder.scans], updatedAt: new Date().toISOString() }
+          : folder,
+      ),
+    );
+  }, []);
+
+  const removeFolderScan = useCallback((folderId: string, scanId: string) => {
+    setFolders((prev) =>
+      prev.map((folder) =>
+        folder.id === folderId
+          ? {
+              ...folder,
+              scans: folder.scans.filter((scan) => scan.id !== scanId),
+              updatedAt: new Date().toISOString(),
+            }
+          : folder,
+      ),
+    );
+  }, []);
+
+  const moveBufferToFolder = useCallback((folderId: string) => {
+    setItems((prevBuffer) => {
+      if (!prevBuffer.length) {
+        return prevBuffer;
+      }
+      setFolders((prevFolders) =>
+        prevFolders.map((folder) =>
+          folder.id === folderId
+            ? {
+                ...folder,
+                scans: [...prevBuffer, ...folder.scans],
+                updatedAt: new Date().toISOString(),
+              }
+            : folder,
+        ),
+      );
+      return [];
+    });
   }, []);
 
   const handleIntent = useCallback(
@@ -446,9 +624,15 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
       try {
         const stored = await AsyncStorage.getItem(STORAGE_KEY);
         if (stored && !cancelled) {
-          const parsed = JSON.parse(stored) as ScanItem[];
+          const parsed = JSON.parse(stored);
           if (Array.isArray(parsed)) {
             setItems(parsed);
+            setFolders([]);
+          } else if (typeof parsed === 'object' && parsed !== null) {
+            const buffer = hydratePersistentScans((parsed as PersistedState).buffer);
+            const persistedFolders = hydratePersistentFolders((parsed as PersistedState).folders);
+            setItems(buffer);
+            setFolders(persistedFolders);
           }
         }
       } catch (err) {
@@ -469,16 +653,21 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
     if (!hydrated) return;
     const persist = async () => {
       try {
-        const payload = JSON.stringify(
-          items.map(({ rawIntent, ...rest }) => rest),
-        );
-        await AsyncStorage.setItem(STORAGE_KEY, payload);
+        const folderPayload = folders.map(({ scans, ...rest }) => ({
+          ...rest,
+          scans: scans.map(({ rawIntent, ...item }) => item),
+        }));
+        const payload: PersistedState = {
+          buffer: items.map(({ rawIntent, ...rest }) => rest),
+          folders: folderPayload,
+        };
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       } catch (err) {
         console.warn('Failed to persist scans', err);
       }
     };
     persist();
-  }, [hydrated, items]);
+  }, [hydrated, items, folders]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') {
@@ -579,6 +768,7 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
   const value = useMemo<ScanContextValue>(
     () => ({
       items,
+      folders,
       lastScan: items.length ? items[0] : null,
       status,
       error,
@@ -586,8 +776,30 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
       clearAll,
       softTrigger,
       itemsCount: items.length,
+      createFolder,
+      renameFolder,
+      deleteFolder,
+      moveScanToFolder,
+      clearFolder,
+      removeFolderScan,
+      moveBufferToFolder,
     }),
-    [clearAll, error, items, removeById, softTrigger, status],
+    [
+      clearAll,
+      clearFolder,
+      createFolder,
+      deleteFolder,
+      error,
+      folders,
+      items,
+      moveScanToFolder,
+      moveBufferToFolder,
+      removeById,
+      removeFolderScan,
+      renameFolder,
+      softTrigger,
+      status,
+    ],
   );
 
   return <ScanContext.Provider value={value}>{children}</ScanContext.Provider>;

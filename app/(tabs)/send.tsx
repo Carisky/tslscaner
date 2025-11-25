@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { PropsWithChildren, useMemo, useState } from 'react';
+import { PropsWithChildren, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -33,15 +33,40 @@ const toPayloadScan = (scan: ScanItem) => ({
 });
 
 export default function SendScreen() {
-  const { items, itemsCount } = useScanSession();
+  const { items, itemsCount, folders } = useScanSession();
   const { serverBaseUrl, apiKey } = useSettings();
   const [comment, setComment] = useState('');
   const [prisma, setPrisma] = useState('');
   const [state, setState] = useState<SendState>('idle');
   const [lastMessage, setLastMessage] = useState('');
+  const [selectedSource, setSelectedSource] = useState<'buffer' | string>('buffer');
 
   const scansEndpoint = useMemo(() => buildScansUrl(serverBaseUrl), [serverBaseUrl]);
   const hasEndpoint = Boolean(scansEndpoint);
+
+  const selectedFolder = folders.find((folder) => folder.id === selectedSource);
+  const activeScans = selectedSource === 'buffer' ? items : selectedFolder?.scans ?? items;
+  const activeCount = activeScans.length;
+  const sourceLabel =
+    selectedSource === 'buffer' ? 'Bufor tymczasowy' : selectedFolder?.name ?? 'Bufor tymczasowy';
+
+  useEffect(() => {
+    if (selectedSource !== 'buffer' && !folders.some((folder) => folder.id === selectedSource)) {
+      setSelectedSource('buffer');
+    }
+  }, [folders, selectedSource]);
+
+  const sourceOptions = useMemo(
+    () => [
+      { id: 'buffer', label: 'Bufor tymczasowy', count: itemsCount },
+      ...folders.map((folder) => ({
+        id: folder.id,
+        label: folder.name,
+        count: folder.scans.length,
+      })),
+    ],
+    [folders, itemsCount],
+  );
 
   const payload = useMemo(
     () => ({
@@ -51,10 +76,10 @@ export default function SendScreen() {
       },
       comment: comment || undefined,
       prisma: prisma || undefined,
-      total: itemsCount,
-      scans: items.map(toPayloadScan),
+      total: activeCount,
+      scans: activeScans.map(toPayloadScan),
     }),
-    [comment, items, itemsCount, prisma],
+    [activeCount, activeScans, comment, prisma],
   );
 
   const sendToEndpoint = async () => {
@@ -62,8 +87,8 @@ export default function SendScreen() {
       Alert.alert('Brak serwera', 'Najpierw ustaw bazowy adres w zakladce Ustawienia.');
       return;
     }
-    if (items.length === 0) {
-      Alert.alert('Brak danych', 'Dodaj przynajmniej jeden skan.');
+    if (activeScans.length === 0) {
+      Alert.alert('Brak danych', `Dodaj skany do ${sourceLabel}.`);
       return;
     }
 
@@ -71,19 +96,19 @@ export default function SendScreen() {
     setLastMessage('');
     try {
       const batches: ScanItem[][] = [];
-      for (let idx = 0; idx < items.length; idx += CHUNK_SIZE) {
-        batches.push(items.slice(idx, idx + CHUNK_SIZE));
+      for (let idx = 0; idx < activeScans.length; idx += CHUNK_SIZE) {
+        batches.push(activeScans.slice(idx, idx + CHUNK_SIZE));
       }
 
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
         console.log(
-          `Sending batch ${batchIndex + 1}/${batches.length} to ${scansEndpoint}`,
+          `Sending batch ${batchIndex + 1}/${batches.length} from ${sourceLabel} to ${scansEndpoint}`,
         );
         const chunkPayload: ScanChunkPayload = {
           device: payload.device,
           comment: payload.comment,
           prisma: payload.prisma,
-          total: itemsCount,
+          total: activeCount,
           scans: batches[batchIndex].map(toPayloadScan),
         };
         await sendScanChunk(serverBaseUrl, apiKey, chunkPayload);
@@ -91,7 +116,7 @@ export default function SendScreen() {
 
       setState('success');
       setLastMessage(
-        `Wyslano ${itemsCount} skanow w ${batches.length} zadaniach na ${scansEndpoint}`,
+        `Wyslano ${activeCount} skanów z ${sourceLabel} w ${batches.length} zadaniach na ${scansEndpoint}`,
       );
       Alert.alert('Sukces', 'Dane wyslano na serwer.');
     } catch (err) {
@@ -123,9 +148,26 @@ export default function SendScreen() {
           showsVerticalScrollIndicator={false}>
           <ThemedText type="title">Wysylka</ThemedText>
           <ThemedText style={styles.helper}>
-            Tymczasowy bufor zawiera {itemsCount} skanow. Mozesz wyslac je na server albo udostepnic
-            dalej.
+            Wybrano {sourceLabel} z {activeCount} skanami. Możesz wysłać je na serwer lub udostępnić dalej.
           </ThemedText>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.sourceRow}
+            contentContainerStyle={styles.sourceRowContent}>
+            {sourceOptions.map((option) => (
+              <Pressable
+                key={option.id}
+                onPress={() => setSelectedSource(option.id)}
+                style={[
+                  styles.sourceChip,
+                  selectedSource === option.id && styles.sourceChipActive,
+                ]}>
+                <ThemedText style={styles.sourceChipLabel}>{option.label}</ThemedText>
+                <ThemedText style={styles.sourceChipCount}>{option.count}</ThemedText>
+              </Pressable>
+            ))}
+          </ScrollView>
 
           <Card>
             <ThemedText type="subtitle">Cel wysylki</ThemedText>
@@ -187,6 +229,33 @@ const styles = StyleSheet.create({
   },
   helper: {
     marginTop: 8,
+    color: '#6b7280',
+  },
+  sourceRow: {
+    marginTop: 12,
+  },
+  sourceRowContent: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sourceChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  sourceChipActive: {
+    borderColor: '#0a7ea4',
+    backgroundColor: '#e0f2ff',
+  },
+  sourceChipLabel: {
+    fontSize: 12,
+    color: '#0a7ea4',
+  },
+  sourceChipCount: {
+    marginTop: 2,
+    fontSize: 12,
     color: '#6b7280',
   },
   card: {
