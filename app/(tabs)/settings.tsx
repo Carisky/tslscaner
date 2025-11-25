@@ -13,8 +13,9 @@ import { ThemedView } from '@/components/themed-view';
 import { useSettings } from '@/providers/settings-provider';
 
 export default function SettingsScreen() {
-  const { serverBaseUrl, setServerBaseUrl, hydrated } = useSettings();
+  const { serverBaseUrl, apiKey, setServerBaseUrl, setApiKey, hydrated } = useSettings();
   const [draftUrl, setDraftUrl] = useState(serverBaseUrl);
+  const [draftApiKey, setDraftApiKey] = useState(apiKey);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -22,12 +23,15 @@ export default function SettingsScreen() {
       return;
     }
     setDraftUrl(serverBaseUrl);
-  }, [hydrated, serverBaseUrl]);
+    setDraftApiKey(apiKey);
+  }, [hydrated, serverBaseUrl, apiKey]);
 
   const normalizedDraft = useMemo(() => draftUrl.trim(), [draftUrl]);
+  const normalizedApiKey = useMemo(() => draftApiKey.trim(), [draftApiKey]);
 
-  const saveBaseUrl = () => {
+  const saveSettings = () => {
     setServerBaseUrl(normalizedDraft);
+    setApiKey(normalizedApiKey);
     setLastSaved(new Date());
   };
 
@@ -62,8 +66,17 @@ export default function SettingsScreen() {
               Przyklad: wklej{' '}
               <ThemedText type="defaultSemiBold">https://rotten-wasps-buy.loca.lt</ThemedText>
             </ThemedText>
+            <ThemedText style={styles.fieldLabel}>X-API-ACCESS</ThemedText>
+            <TextInput
+              value={draftApiKey}
+              onChangeText={setDraftApiKey}
+              placeholder="Klucz API"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
             <Pressable
-              onPress={saveBaseUrl}
+              onPress={saveSettings}
               style={[styles.button, !normalizedDraft.length && styles.buttonDisabled]}
               disabled={!normalizedDraft.length}>
               <ThemedText style={styles.buttonText}>Zapisz</ThemedText>
@@ -96,6 +109,11 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: '#6b7280',
     fontSize: 12,
+  },
+  fieldLabel: {
+    marginTop: 16,
+    fontSize: 12,
+    color: '#6b7280',
   },
   card: {
     marginTop: 16,

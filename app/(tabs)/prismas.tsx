@@ -8,35 +8,17 @@ import {
   View,
 } from 'react-native';
 
+import { fetchPrismas, PrismaSummary, updatePrismaFact } from '@/api/prismas';
+import { getApiRoot } from '@/api/client';
+import { getRequestErrorMessage } from '@/api/errors';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useSettings } from '@/providers/settings-provider';
 
-type PrismaSummary = {
-  name: string;
-  totalCount: number;
-  factScanned?: number | null;
-};
-
-const buildEndpoint = (rawUrl: string) => {
-  const trimmed = rawUrl.trim();
-  if (!trimmed.length) {
-    return '';
-  }
-  const withoutTrailers = trimmed.replace(/\/+$/, '');
-  if (/\/api\/scans$/i.test(withoutTrailers)) {
-    return withoutTrailers;
-  }
-  return `${withoutTrailers}/api/scans`;
-};
-
 export default function PrismasScreen() {
-  const { serverBaseUrl } = useSettings();
-  const resolvedScanEndpoint = useMemo(() => buildEndpoint(serverBaseUrl), [serverBaseUrl]);
-  const resolvedApiBase = useMemo(
-    () => (resolvedScanEndpoint ? resolvedScanEndpoint.replace(/\/scans$/i, '') : ''),
-    [resolvedScanEndpoint],
-  );
+  const { serverBaseUrl, apiKey } = useSettings();
+  const apiRoot = useMemo(() => getApiRoot(serverBaseUrl), [serverBaseUrl]);
+  const hasApi = Boolean(apiRoot);
 
   const [prismas, setPrismas] = useState<PrismaSummary[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -46,20 +28,15 @@ export default function PrismasScreen() {
   const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState('');
 
-  const fetchPrismas = useCallback(async () => {
-    if (!resolvedApiBase) {
+  const loadPrismas = useCallback(async () => {
+    if (!hasApi) {
       return;
     }
     setLoading(true);
     setFetchError('');
     setStatusMessage('');
     try {
-      const response = await fetch(`${resolvedApiBase}/prismas`);
-      if (!response.ok) {
-        throw new Error(`Serwer zwrócił ${response.status}`);
-      }
-      const payload = (await response.json()) as { prismas?: PrismaSummary[] };
-      const list = Array.isArray(payload.prismas) ? payload.prismas : [];
+        const list = await fetchPrismas(serverBaseUrl, apiKey);
       setPrismas(list);
       setDrafts(
         list.reduce<Record<string, string>>((acc, prisma) => {
@@ -68,22 +45,22 @@ export default function PrismasScreen() {
         }, {}),
       );
     } catch (err) {
-      setFetchError((err as Error)?.message ?? 'Nie udało się pobrać danych');
+      setFetchError(getRequestErrorMessage(err, 'Nie udało się pobrać danych'));
     } finally {
       setLoading(false);
     }
-  }, [resolvedApiBase]);
+  }, [apiKey, hasApi, serverBaseUrl]);
 
   useEffect(() => {
-    if (!resolvedApiBase) {
+    if (!hasApi) {
       setPrismas([]);
       setDrafts({});
       setFetchError('');
       setStatusMessage('');
       return;
     }
-    void fetchPrismas();
-  }, [fetchPrismas, resolvedApiBase]);
+    void loadPrismas();
+  }, [loadPrismas, hasApi]);
 
   const handleDraftChange = (name: string, value: string) => {
     setDrafts((prev) => ({ ...prev, [name]: value }));
@@ -98,7 +75,7 @@ export default function PrismasScreen() {
   };
 
   const handleUpdateFact = async (prismaName: string) => {
-    if (!resolvedApiBase) {
+    if (!hasApi) {
       return;
     }
 
@@ -126,22 +103,12 @@ export default function PrismasScreen() {
     });
 
     try {
-      const response = await fetch(
-        `${resolvedApiBase}/prismas/${encodeURIComponent(prismaName)}/fact`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ factScanned: numeric }),
-        },
+      const payload = await updatePrismaFact(
+        serverBaseUrl,
+        apiKey,
+        prismaName,
+        numeric,
       );
-
-      if (!response.ok) {
-        const responseText = await response.text();
-        const trailing = responseText ? `: ${responseText}` : '';
-        throw new Error(`Serwer zwrócił ${response.status}${trailing}`);
-      }
-
-      const payload = (await response.json()) as { name: string; factScanned: number };
       setPrismas((prev) =>
         prev.map((entry) =>
           entry.name === payload.name ? { ...entry, factScanned: payload.factScanned } : entry,
@@ -152,7 +119,7 @@ export default function PrismasScreen() {
     } catch (err) {
       setCardErrors((prev) => ({
         ...prev,
-        [prismaName]: (err as Error)?.message ?? 'Nie udało się zaktualizować',
+        [prismaName]: getRequestErrorMessage(err, 'Nie udało się zaktualizować'),
       }));
     } finally {
       setUpdating((prev) => {
@@ -163,14 +130,13 @@ export default function PrismasScreen() {
     }
   };
 
-  const hasApi = Boolean(resolvedApiBase);
   const headerComponent = (
     <View style={styles.headerContent}>
       <View style={styles.headerRow}>
         <ThemedText type="title">Prismy</ThemedText>
         {hasApi && (
           <Pressable
-            onPress={() => void fetchPrismas()}
+            onPress={() => void loadPrismas()}
             style={({ pressed }) => [
               styles.refreshButton,
               pressed && styles.buttonPressed,

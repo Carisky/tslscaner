@@ -13,6 +13,9 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { buildScansUrl } from '@/api/client';
+import { sendScanChunk, type ScanChunkPayload } from '@/api/scans';
+import { getRequestErrorMessage } from '@/api/errors';
 import type { ScanItem } from '@/providers/scan-provider';
 import { useScanSession } from '@/providers/scan-provider';
 import { useSettings } from '@/providers/settings-provider';
@@ -29,27 +32,16 @@ const toPayloadScan = (scan: ScanItem) => ({
   source: scan.source,
 });
 
-const buildEndpoint = (rawUrl: string) => {
-  const trimmed = rawUrl.trim();
-  if (!trimmed.length) {
-    return '';
-  }
-  const withoutTrailers = trimmed.replace(/\/+$/, '');
-  if (/\/api\/scans$/i.test(withoutTrailers)) {
-    return withoutTrailers;
-  }
-  return `${withoutTrailers}/api/scans`;
-};
-
 export default function SendScreen() {
   const { items, itemsCount } = useScanSession();
-  const { serverBaseUrl } = useSettings();
+  const { serverBaseUrl, apiKey } = useSettings();
   const [comment, setComment] = useState('');
   const [prisma, setPrisma] = useState('');
   const [state, setState] = useState<SendState>('idle');
   const [lastMessage, setLastMessage] = useState('');
 
-  const resolvedEndpoint = useMemo(() => buildEndpoint(serverBaseUrl), [serverBaseUrl]);
+  const scansEndpoint = useMemo(() => buildScansUrl(serverBaseUrl), [serverBaseUrl]);
+  const hasEndpoint = Boolean(scansEndpoint);
 
   const payload = useMemo(
     () => ({
@@ -66,7 +58,7 @@ export default function SendScreen() {
   );
 
   const sendToEndpoint = async () => {
-    if (!resolvedEndpoint.length) {
+    if (!hasEndpoint) {
       Alert.alert('Brak serwera', 'Najpierw ustaw bazowy adres w zakladce Ustawienia.');
       return;
     }
@@ -85,41 +77,26 @@ export default function SendScreen() {
 
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
         console.log(
-          `Sending batch ${batchIndex + 1}/${batches.length} to ${resolvedEndpoint}`,
+          `Sending batch ${batchIndex + 1}/${batches.length} to ${scansEndpoint}`,
         );
-        const chunkPayload = {
+        const chunkPayload: ScanChunkPayload = {
           device: payload.device,
           comment: payload.comment,
           prisma: payload.prisma,
           total: itemsCount,
           scans: batches[batchIndex].map(toPayloadScan),
         };
-        const response = await fetch(resolvedEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(chunkPayload),
-        });
-
-        if (!response.ok) {
-          const responseText = await response.text();
-          const details =
-            responseText && responseText.length ? ` | tresc: ${responseText}` : '';
-          throw new Error(
-            `Serwer zwrocil ${response.status} (partia ${batchIndex + 1}/${
-              batches.length
-            })${details}`,
-          );
-        }
+        await sendScanChunk(serverBaseUrl, apiKey, chunkPayload);
       }
 
       setState('success');
       setLastMessage(
-        `Wyslano ${itemsCount} skanow w ${batches.length} zadaniach na ${resolvedEndpoint}`,
+        `Wyslano ${itemsCount} skanow w ${batches.length} zadaniach na ${scansEndpoint}`,
       );
       Alert.alert('Sukces', 'Dane wyslano na serwer.');
     } catch (err) {
       setState('error');
-      const message = (err as Error)?.message ?? 'Blad';
+      const message = getRequestErrorMessage(err, 'Blad wysylki');
       setLastMessage(message);
       Alert.alert('Blad wysylki', message);
     }
@@ -172,9 +149,9 @@ export default function SendScreen() {
             <Pressable
               style={[
                 styles.button,
-                (state === 'sending' || !resolvedEndpoint.length) && styles.buttonDisabled,
-              ]}
-              disabled={state === 'sending' || !resolvedEndpoint.length}
+              (state === 'sending' || !hasEndpoint) && styles.buttonDisabled,
+            ]}
+            disabled={state === 'sending' || !hasEndpoint}
               onPress={sendToEndpoint}>
               <ThemedText style={styles.buttonText}>
                 {state === 'sending' ? 'Wysylanie...' : 'Wyslij'}
