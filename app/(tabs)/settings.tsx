@@ -64,9 +64,9 @@ export default function SettingsScreen() {
             />
             <ThemedText style={styles.helper}>
               Przyklad: wklej{' '}
-              <ThemedText type="defaultSemiBold">https://www-site-domen</ThemedText>
+              <ThemedText type="defaultSemiBold">https://web-site-domen</ThemedText>
             </ThemedText>
-            <ThemedText style={styles.fieldLabel}>X-API-ACCESS</ThemedText>
+            <ThemedText style={styles.fieldLabel}>X-API-ACCESS-TOKEN</ThemedText>
             <TextInput
               value={draftApiKey}
               onChangeText={setDraftApiKey}

@@ -1,6 +1,7 @@
+import Constants from 'expo-constants';
+import * as FileSystem from 'expo-file-system';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
-import Constants from 'expo-constants';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -37,6 +38,9 @@ type ParsedRelease = {
 const GITHUB_RELEASE_URL = 'https://api.github.com/repos/Carisky/tslscaner/releases/latest';
 const CHECK_INTERVAL_MS = 1000 * 60 * 60 * 4;
 const INSTALL_FLAGS = 0x10000000 | 0x00000001;
+
+const ensureTrailingSlash = (value: string | null | undefined) =>
+  value ? (value.endsWith('/') ? value : `${value}/`) : null;
 
 const normalizeVersion = (input: string) => input.replace(/^v/i, '').trim();
 const splitVersion = (value: string) =>
@@ -84,9 +88,12 @@ export const UpdateChecker = () => {
   const isAndroid = Platform.OS === 'android';
   const currentVersion = useMemo(getCurrentVersion, []);
   const [release, setRelease] = useState<ParsedRelease | null>(null);
-  const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'error'>('idle');
+  const [downloadState, setDownloadState] = useState<
+    'idle' | 'downloading' | 'installing' | 'error'
+  >('idle');
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const downloadStateRef = useRef(downloadState);
+  const downloadStateRef = useRef<'idle' | 'downloading' | 'installing' | 'error'>(downloadState);
 
   useEffect(() => {
     downloadStateRef.current = downloadState;
@@ -99,7 +106,11 @@ export const UpdateChecker = () => {
     let cancelled = false;
 
     const checkRelease = async () => {
-      if (cancelled || downloadStateRef.current === 'downloading') {
+      if (
+        cancelled ||
+        downloadStateRef.current === 'downloading' ||
+        downloadStateRef.current === 'installing'
+      ) {
         return;
       }
 
@@ -153,27 +164,60 @@ export const UpdateChecker = () => {
     try {
       setDownloadState('downloading');
       setErrorMessage(null);
-      const cacheBase = LegacyFileSystem.cacheDirectory;
+      setDownloadProgress(0);
+
+      const documentFallback = ensureTrailingSlash(FileSystem.Paths.document.uri);
+      const cacheBase =
+        LegacyFileSystem.cacheDirectory ??
+        LegacyFileSystem.documentDirectory ??
+        documentFallback;
       if (!cacheBase) {
-        throw new Error('Не удалось получить путь к папке кеша');
+        throw new Error('Unable to locate a writable directory for the downloaded update.');
       }
-      const normalizedCache = cacheBase.endsWith('/') ? cacheBase : `${cacheBase}/`;
+      const normalizedCache = ensureTrailingSlash(cacheBase) ?? cacheBase;
       const destinationUri = `${normalizedCache}${release.assetName}`;
+
       await LegacyFileSystem.deleteAsync(destinationUri, { idempotent: true });
-      await LegacyFileSystem.downloadAsync(release.assetUrl, destinationUri);
-      const contentUri = await LegacyFileSystem.getContentUriAsync(destinationUri);
+
+      const downloadResumable = LegacyFileSystem.createDownloadResumable(
+        release.assetUrl,
+        destinationUri,
+        undefined,
+        (progress) => {
+          if (progress.totalBytesExpectedToWrite > 0) {
+            setDownloadProgress(
+              progress.totalBytesWritten / progress.totalBytesExpectedToWrite,
+            );
+          }
+        },
+      );
+
+      await downloadResumable.downloadAsync();
+
+      let installUri = destinationUri;
+      try {
+        installUri = await LegacyFileSystem.getContentUriAsync(destinationUri);
+      } catch (fallbackErr) {
+        console.warn(
+          'Failed to resolve content URI for the downloaded APK, falling back to file path',
+          fallbackErr,
+        );
+      }
+
+      setDownloadState('installing');
+      setDownloadProgress(null);
 
       await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: contentUri,
+        data: installUri,
         type: 'application/vnd.android.package-archive',
         flags: INSTALL_FLAGS,
       });
 
-      setDownloadState('idle');
       BackHandler.exitApp();
     } catch (err) {
       console.warn('Failed to install update', err);
       setDownloadState('error');
+      setDownloadProgress(null);
       setErrorMessage(
         err instanceof Error ? err.message : 'Не удалось скачать или установить обновление',
       );
@@ -183,6 +227,14 @@ export const UpdateChecker = () => {
   if (!isAndroid || !release) {
     return null;
   }
+
+  const isDownloading = downloadState === 'downloading' || downloadState === 'installing';
+  const downloadLabel =
+    downloadState === 'installing'
+      ? 'Launching installer...'
+      : downloadProgress != null
+        ? `Скачано ${Math.round(downloadProgress * 100)}%`
+        : 'Скачиваю обновление…';
 
   return (
     <View style={styles.container} pointerEvents="box-none">
@@ -196,10 +248,10 @@ export const UpdateChecker = () => {
           </ThemedText>
         </View>
         <View style={styles.controls}>
-          {downloadState === 'downloading' ? (
+          {isDownloading ? (
             <View style={styles.downloadRow}>
               <ActivityIndicator color="#fff" />
-              <ThemedText style={styles.statusText}>Скачиваю обновление…</ThemedText>
+              <ThemedText style={styles.statusText}>{downloadLabel}</ThemedText>
             </View>
           ) : (
             <Pressable style={styles.button} onPress={downloadAndInstall}>
