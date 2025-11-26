@@ -64,7 +64,7 @@ export default function SettingsScreen() {
             />
             <ThemedText style={styles.helper}>
               Przyklad: wklej{' '}
-              <ThemedText type="defaultSemiBold">https://rotten-wasps-buy.loca.lt</ThemedText>
+              <ThemedText type="defaultSemiBold">https://www-site-domen</ThemedText>
             </ThemedText>
             <ThemedText style={styles.fieldLabel}>X-API-ACCESS</ThemedText>
             <TextInput

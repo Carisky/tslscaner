@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import Constants from 'expo-constants';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -81,29 +81,25 @@ const findApkAsset = (assets: ReleaseAsset[] | undefined) => {
 };
 
 export const UpdateChecker = () => {
+  const isAndroid = Platform.OS === 'android';
   const currentVersion = useMemo(getCurrentVersion, []);
-  if (Platform.OS !== 'android') {
-    return null;
-  }
   const [release, setRelease] = useState<ParsedRelease | null>(null);
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const downloadStateRef = useRef(downloadState);
-  const releaseRef = useRef<ParsedRelease | null>(null);
 
   useEffect(() => {
     downloadStateRef.current = downloadState;
   }, [downloadState]);
 
   useEffect(() => {
-    releaseRef.current = release;
-  }, [release]);
-
-  useEffect(() => {
+    if (!isAndroid) {
+      return;
+    }
     let cancelled = false;
 
     const checkRelease = async () => {
-      if (cancelled || downloadStateRef.current === 'downloading' || releaseRef.current) {
+      if (cancelled || downloadStateRef.current === 'downloading') {
         return;
       }
 
@@ -133,7 +129,6 @@ export const UpdateChecker = () => {
           assetName: asset.name ?? `tslscaner-${normalizedTag}.apk`,
         };
         setRelease(parsedRelease);
-        releaseRef.current = parsedRelease;
         setDownloadState('idle');
         setErrorMessage(null);
       } catch (err) {
@@ -148,7 +143,7 @@ export const UpdateChecker = () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [currentVersion]);
+  }, [currentVersion, isAndroid]);
 
   const downloadAndInstall = useCallback(async () => {
     if (!release) {
@@ -158,16 +153,23 @@ export const UpdateChecker = () => {
     try {
       setDownloadState('downloading');
       setErrorMessage(null);
-      const destinationUri = `${FileSystem.cacheDirectory}${release.assetName}`;
-      await FileSystem.deleteAsync(destinationUri, { idempotent: true });
-      await FileSystem.downloadAsync(release.assetUrl, destinationUri);
+      const cacheBase = LegacyFileSystem.cacheDirectory;
+      if (!cacheBase) {
+        throw new Error('Не удалось получить путь к папке кеша');
+      }
+      const normalizedCache = cacheBase.endsWith('/') ? cacheBase : `${cacheBase}/`;
+      const destinationUri = `${normalizedCache}${release.assetName}`;
+      await LegacyFileSystem.deleteAsync(destinationUri, { idempotent: true });
+      await LegacyFileSystem.downloadAsync(release.assetUrl, destinationUri);
+      const contentUri = await LegacyFileSystem.getContentUriAsync(destinationUri);
 
       await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: destinationUri,
+        data: contentUri,
         type: 'application/vnd.android.package-archive',
         flags: INSTALL_FLAGS,
       });
 
+      setDownloadState('idle');
       BackHandler.exitApp();
     } catch (err) {
       console.warn('Failed to install update', err);
@@ -178,7 +180,7 @@ export const UpdateChecker = () => {
     }
   }, [release]);
 
-  if (!release) {
+  if (!isAndroid || !release) {
     return null;
   }
 
