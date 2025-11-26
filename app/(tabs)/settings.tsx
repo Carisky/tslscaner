@@ -66,7 +66,7 @@ export default function SettingsScreen() {
               Przyklad: wklej{' '}
               <ThemedText type="defaultSemiBold">https://web-site-domen</ThemedText>
             </ThemedText>
-            <ThemedText style={styles.fieldLabel}>X-API-ACCESS-TOKEN</ThemedText>
+            <ThemedText style={styles.fieldLabel}>X-API-KEY-TEST-1.1.7</ThemedText>
             <TextInput
               value={draftApiKey}
               onChangeText={setDraftApiKey}

@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
@@ -5,7 +6,6 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  BackHandler,
   Platform,
   Pressable,
   StyleSheet,
@@ -38,6 +38,8 @@ type ParsedRelease = {
 const GITHUB_RELEASE_URL = 'https://api.github.com/repos/Carisky/tslscaner/releases/latest';
 const CHECK_INTERVAL_MS = 1000 * 60 * 60 * 4;
 const INSTALL_FLAGS = 0x10000000 | 0x00000001;
+const STORAGE_KEY_DISMISSED_VERSION = '@tslscaner_dismissed_update_version';
+const STORAGE_KEY_INSTALLED_VERSION = '@tslscaner_installed_update_version';
 
 const ensureTrailingSlash = (value: string | null | undefined) =>
   value ? (value.endsWith('/') ? value : `${value}/`) : null;
@@ -89,15 +91,42 @@ export const UpdateChecker = () => {
   const currentVersion = useMemo(getCurrentVersion, []);
   const [release, setRelease] = useState<ParsedRelease | null>(null);
   const [downloadState, setDownloadState] = useState<
-    'idle' | 'downloading' | 'installing' | 'error'
+    'idle' | 'downloading' | 'ready' | 'installing' | 'error'
   >('idle');
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const downloadStateRef = useRef<'idle' | 'downloading' | 'installing' | 'error'>(downloadState);
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
+  const [downloadedApkUri, setDownloadedApkUri] = useState<string | null>(null);
+  const downloadStateRef = useRef<'idle' | 'downloading' | 'ready' | 'installing' | 'error'>(downloadState);
 
   useEffect(() => {
     downloadStateRef.current = downloadState;
   }, [downloadState]);
+
+  // Загружаем информацию о пропущенной версии при монтировании
+  useEffect(() => {
+    if (!isAndroid) {
+      return;
+    }
+    
+    const loadDismissedVersion = async () => {
+      try {
+        const dismissed = await AsyncStorage.getItem(STORAGE_KEY_DISMISSED_VERSION);
+        const installed = await AsyncStorage.getItem(STORAGE_KEY_INSTALLED_VERSION);
+        
+        // Если есть установленная версия, используем её как пропущенную
+        if (installed) {
+          setDismissedVersion(installed);
+        } else if (dismissed) {
+          setDismissedVersion(dismissed);
+        }
+      } catch (err) {
+        console.warn('Failed to load dismissed version', err);
+      }
+    };
+
+    loadDismissedVersion();
+  }, [isAndroid]);
 
   useEffect(() => {
     if (!isAndroid) {
@@ -139,6 +168,12 @@ export const UpdateChecker = () => {
           assetUrl: asset.browser_download_url,
           assetName: asset.name ?? `tslscaner-${normalizedTag}.apk`,
         };
+        
+        // Не показываем обновление, если эта версия уже была установлена или пропущена
+        if (dismissedVersion && !isVersionGreater(normalizedTag, dismissedVersion)) {
+          return;
+        }
+        
         setRelease(parsedRelease);
         setDownloadState('idle');
         setErrorMessage(null);
@@ -154,7 +189,7 @@ export const UpdateChecker = () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [currentVersion, isAndroid]);
+  }, [currentVersion, isAndroid, dismissedVersion]);
 
   const downloadAndInstall = useCallback(async () => {
     if (!release) {
@@ -192,35 +227,82 @@ export const UpdateChecker = () => {
         },
       );
 
-      await downloadResumable.downloadAsync();
+      const downloadResult = await downloadResumable.downloadAsync();
+      
+      if (!downloadResult?.uri) {
+        throw new Error('Download failed - no file URI returned');
+      }
 
-      let installUri = destinationUri;
+      // Получаем content URI для установки
+      let installUri = downloadResult.uri;
       try {
-        installUri = await LegacyFileSystem.getContentUriAsync(destinationUri);
+        installUri = await LegacyFileSystem.getContentUriAsync(downloadResult.uri);
       } catch (fallbackErr) {
         console.warn(
-          'Failed to resolve content URI for the downloaded APK, falling back to file path',
+          'Failed to resolve content URI, using file path directly',
           fallbackErr,
         );
       }
 
-      setDownloadState('installing');
+      // Сохраняем URI скачанного APK и меняем состояние на "готово к установке"
+      setDownloadedApkUri(installUri);
+      setDownloadState('ready');
       setDownloadProgress(null);
-
-      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: installUri,
-        type: 'application/vnd.android.package-archive',
-        flags: INSTALL_FLAGS,
-      });
-
-      BackHandler.exitApp();
+      
     } catch (err) {
-      console.warn('Failed to install update', err);
+      console.error('Failed to download update', err);
       setDownloadState('error');
       setDownloadProgress(null);
       setErrorMessage(
-        err instanceof Error ? err.message : 'Не удалось скачать или установить обновление',
+        err instanceof Error ? err.message : 'Не удалось скачать обновление',
       );
+    }
+  }, [release]);
+
+  const installApk = useCallback(async () => {
+    if (!release || !downloadedApkUri) {
+      return;
+    }
+
+    try {
+      setDownloadState('installing');
+      
+      // СНАЧАЛА сохраняем версию в AsyncStorage
+      await AsyncStorage.setItem(STORAGE_KEY_INSTALLED_VERSION, release.version);
+      console.log('Version saved to storage:', release.version);
+      
+      // Небольшая задержка для гарантии записи
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // ПОТОМ запускаем установщик
+      await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
+        data: downloadedApkUri,
+        flags: INSTALL_FLAGS,
+      });
+
+      // Обновляем локальное состояние (это может не выполниться, если система закроет приложение)
+      setDismissedVersion(release.version);
+      
+    } catch (err) {
+      console.error('Failed to install update', err);
+      setDownloadState('error');
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Не удалось установить обновление',
+      );
+    }
+  }, [release, downloadedApkUri]);
+
+  const handleDismiss = useCallback(async () => {
+    if (!release) {
+      return;
+    }
+    
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY_DISMISSED_VERSION, release.version);
+      setDismissedVersion(release.version);
+      setRelease(null);
+    } catch (err) {
+      console.warn('Failed to save dismissed version', err);
     }
   }, [release]);
 
@@ -228,21 +310,26 @@ export const UpdateChecker = () => {
     return null;
   }
 
-  const isDownloading = downloadState === 'downloading' || downloadState === 'installing';
-  const downloadLabel =
-    downloadState === 'installing'
-      ? 'Launching installer...'
-      : downloadProgress != null
-        ? `Скачано ${Math.round(downloadProgress * 100)}%`
-        : 'Скачиваю обновление…';
+  const isDownloading = downloadState === 'downloading';
+  const isReady = downloadState === 'ready';
+  const isInstalling = downloadState === 'installing';
+  
+  const downloadLabel = downloadProgress != null
+    ? `Скачано ${Math.round(downloadProgress * 100)}%`
+    : 'Скачиваю обновление…';
 
   return (
     <View style={styles.container} pointerEvents="box-none">
       <View style={styles.banner}>
         <View style={styles.header}>
-          <ThemedText type="subtitle" style={styles.title}>
-            Новая версия {release.version} уже готова
-          </ThemedText>
+          <View style={styles.titleRow}>
+            <ThemedText type="subtitle" style={styles.title}>
+              Новая версия {release.version} уже готова
+            </ThemedText>
+            <Pressable onPress={handleDismiss} style={styles.closeButton}>
+              <ThemedText style={styles.closeText}>✕</ThemedText>
+            </Pressable>
+          </View>
           <ThemedText style={styles.notes}>
             {release.notes.length ? release.notes.split('\n')[0] : 'Скачай APK и установи обновление.'}
           </ThemedText>
@@ -253,9 +340,18 @@ export const UpdateChecker = () => {
               <ActivityIndicator color="#fff" />
               <ThemedText style={styles.statusText}>{downloadLabel}</ThemedText>
             </View>
+          ) : isReady ? (
+            <Pressable style={styles.button} onPress={installApk}>
+              <ThemedText style={styles.buttonText}>Установи</ThemedText>
+            </Pressable>
+          ) : isInstalling ? (
+            <View style={styles.downloadRow}>
+              <ActivityIndicator color="#fff" />
+              <ThemedText style={styles.statusText}>Запускаю установщик...</ThemedText>
+            </View>
           ) : (
             <Pressable style={styles.button} onPress={downloadAndInstall}>
-              <ThemedText style={styles.buttonText}>обнови</ThemedText>
+              <ThemedText style={styles.buttonText}>Скачай</ThemedText>
             </Pressable>
           )}
           {downloadState === 'error' && errorMessage ? (
@@ -288,8 +384,24 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 12,
   },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
   title: {
     color: '#fff',
+    flex: 1,
+  },
+  closeButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  closeText: {
+    color: '#fff',
+    fontSize: 20,
+    lineHeight: 20,
+    opacity: 0.8,
   },
   notes: {
     color: '#f0fdfa',
