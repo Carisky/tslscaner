@@ -11,6 +11,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 
@@ -89,6 +90,7 @@ const findApkAsset = (assets: ReleaseAsset[] | undefined) => {
 export const UpdateChecker = () => {
   const isAndroid = Platform.OS === 'android';
   const currentVersion = useMemo(getCurrentVersion, []);
+  const insets = useSafeAreaInsets();
   const [release, setRelease] = useState<ParsedRelease | null>(null);
   const [downloadState, setDownloadState] = useState<
     'idle' | 'downloading' | 'ready' | 'installing' | 'error'
@@ -319,7 +321,10 @@ export const UpdateChecker = () => {
     : 'Downloading update…';
 
   return (
-    <View style={styles.container} pointerEvents="box-none">
+    <View
+      style={[styles.container, { bottom: 16 + insets.bottom }]}
+      pointerEvents="box-none"
+    >
       <View style={styles.banner}>
         <View style={styles.header}>
           <View style={styles.titleRow}>
