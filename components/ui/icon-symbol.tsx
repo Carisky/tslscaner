@@ -22,6 +22,7 @@ const MAPPING = {
   'tray.and.arrow.up.fill': 'cloud-upload',
   'list.bullet': 'format-list-bulleted',
   'chart.bar.fill': 'stacked-bar-chart',
+  'tram.fill': 'train',
 } as IconMapping;
 
 /**
