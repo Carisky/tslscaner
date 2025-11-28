@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { PropsWithChildren, useEffect, useMemo, useState } from 'react';
 import {
@@ -23,7 +24,10 @@ import { useScanSession } from '@/providers/scan-provider';
 import { useSettings } from '@/providers/settings-provider';
 
 type SendState = 'idle' | 'sending' | 'success' | 'error';
-const CHUNK_SIZE = 300;
+const CHUNK_SIZE = 50;
+const SEND_SESSION_STORAGE_KEY = 'tslscaner.sendSessions.v1';
+const MAX_CHUNK_RETRY = 3;
+const RETRY_DELAY_MS = 1500;
 type TargetType = 'prisma' | 'train';
 const TARGET_OPTIONS: { id: TargetType; label: string }[] = [
   { id: 'prisma', label: 'Prisma' },
@@ -38,6 +42,62 @@ const toPayloadScan = (scan: ScanItem) => ({
   timestamp: scan.timestamp,
   source: scan.source,
 });
+
+const chunkArray = <T,>(items: T[], size: number) => {
+  const chunks: T[][] = [];
+  for (let idx = 0; idx < items.length; idx += size) {
+    chunks.push(items.slice(idx, idx + size));
+  }
+  return chunks;
+};
+
+type ChunkPayload = ReturnType<typeof toPayloadScan>;
+type StoredChunk = {
+  scans: ChunkPayload[];
+  sent: boolean;
+  createdAt: string;
+};
+type StoredSendSession = {
+  device: ScanChunkPayload['device'];
+  comment?: string;
+  prisma?: string;
+  train?: string;
+  total: number;
+  chunkSize: number;
+  createdAt: string;
+  chunks: StoredChunk[];
+};
+type PendingSendSessions = Record<string, StoredSendSession>;
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const readSendSessions = async (): Promise<PendingSendSessions> => {
+  try {
+    const raw = await AsyncStorage.getItem(SEND_SESSION_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    return JSON.parse(raw) as PendingSendSessions;
+  } catch (err) {
+    console.warn('Failed to hydrate send sessions', err);
+    return {};
+  }
+};
+
+const saveSendSessions = async (sessions: PendingSendSessions) => {
+  try {
+    if (!Object.keys(sessions).length) {
+      await AsyncStorage.removeItem(SEND_SESSION_STORAGE_KEY);
+      return;
+    }
+    await AsyncStorage.setItem(SEND_SESSION_STORAGE_KEY, JSON.stringify(sessions));
+  } catch (err) {
+    console.warn('Failed to persist send sessions', err);
+  }
+};
 
 export default function SendScreen() {
   const { items, itemsCount, folders } = useScanSession();
@@ -98,37 +158,91 @@ export default function SendScreen() {
       Alert.alert('Brak serwera', 'Najpierw ustaw bazowy adres w zakladce Ustawienia.');
       return;
     }
-    if (activeScans.length === 0) {
-      Alert.alert('Brak danych', `Dodaj skany do ${sourceLabel}.`);
-      return;
-    }
 
     setState('sending');
     setLastMessage('');
     try {
-      const batches: ScanItem[][] = [];
-      for (let idx = 0; idx < activeScans.length; idx += CHUNK_SIZE) {
-        batches.push(activeScans.slice(idx, idx + CHUNK_SIZE));
+      const sourceKey = selectedSource;
+      const storedSessions = await readSendSessions();
+      let session: StoredSendSession | undefined = storedSessions[sourceKey];
+
+      if (session && session.chunks.every((chunk) => chunk.sent)) {
+        delete storedSessions[sourceKey];
+        session = undefined;
+        await saveSendSessions(storedSessions);
       }
 
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
-        console.log(
-          `Sending batch ${batchIndex + 1}/${batches.length} from ${sourceLabel} to ${scansEndpoint}`,
-        );
-        const chunkPayload: ScanChunkPayload = {
+      if (!session) {
+        if (activeScans.length === 0) {
+          setState('idle');
+          Alert.alert('Brak danych', `Dodaj skany do ${sourceLabel}.`);
+          return;
+        }
+
+        const chunkedScans = chunkArray(activeScans.map(toPayloadScan), CHUNK_SIZE);
+        session = {
           device: payload.device,
           comment: payload.comment,
           prisma: payload.prisma,
           train: payload.train,
-          total: activeCount,
-          scans: batches[batchIndex].map(toPayloadScan),
+          total: payload.total,
+          chunkSize: CHUNK_SIZE,
+          createdAt: new Date().toISOString(),
+          chunks: chunkedScans.map((batch) => ({
+            scans: batch,
+            sent: false,
+            createdAt: new Date().toISOString(),
+          })),
         };
-        await sendScanChunk(serverBaseUrl, apiKey, chunkPayload);
+        storedSessions[sourceKey] = session;
+        await saveSendSessions(storedSessions);
       }
+
+      const chunkCount = session.chunks.length;
+
+      const sendChunkWithRetry = async (chunkPayload: ScanChunkPayload) => {
+        let attempt = 0;
+        while (attempt < MAX_CHUNK_RETRY) {
+          try {
+            await sendScanChunk(serverBaseUrl, apiKey, chunkPayload);
+            return;
+          } catch (err) {
+            attempt += 1;
+            if (attempt >= MAX_CHUNK_RETRY) {
+              throw err;
+            }
+            await wait(RETRY_DELAY_MS * attempt);
+          }
+        }
+      };
+
+      for (let chunkIndex = 0; chunkIndex < session.chunks.length; chunkIndex += 1) {
+        const chunk = session.chunks[chunkIndex];
+        if (chunk.sent) {
+          continue;
+        }
+
+        const chunkPayload: ScanChunkPayload = {
+          device: session.device,
+          comment: session.comment,
+          prisma: session.prisma,
+          train: session.train,
+          total: session.total,
+          scans: chunk.scans,
+        };
+
+        await sendChunkWithRetry(chunkPayload);
+        chunk.sent = true;
+        storedSessions[sourceKey] = session;
+        await saveSendSessions(storedSessions);
+      }
+
+      delete storedSessions[sourceKey];
+      await saveSendSessions(storedSessions);
 
       setState('success');
       setLastMessage(
-        `Wyslano ${activeCount} skanów z ${sourceLabel} w ${batches.length} zadaniach na ${scansEndpoint}`,
+        `Wyslano ${session.total} skanow z ${sourceLabel} w ${chunkCount} zadaniach na ${scansEndpoint}`,
       );
       Alert.alert('Sukces', 'Dane wyslano na serwer.');
     } catch (err) {
