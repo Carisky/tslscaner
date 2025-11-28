@@ -27,7 +27,7 @@ type SendState = 'idle' | 'sending' | 'success' | 'error';
 const CHUNK_SIZE = 50;
 const SEND_SESSION_STORAGE_KEY = 'tslscaner.sendSessions.v1';
 const MAX_CHUNK_RETRY = 3;
-const RETRY_DELAY_MS = 1500;
+const RETRY_DELAY_MS = 15000;
 type TargetType = 'prisma' | 'train';
 const TARGET_OPTIONS: { id: TargetType; label: string }[] = [
   { id: 'prisma', label: 'Prisma' },
