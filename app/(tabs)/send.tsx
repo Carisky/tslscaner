@@ -11,17 +11,17 @@ import {
   TextInput,
 } from 'react-native';
 
+import { buildScansUrl } from '@/api/client';
+import { getRequestErrorMessage } from '@/api/errors';
+import { sendScanChunk, type ScanChunkPayload } from '@/api/scans';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { buildScansUrl } from '@/api/client';
-import { sendScanChunk, type ScanChunkPayload } from '@/api/scans';
-import { getRequestErrorMessage } from '@/api/errors';
 import type { ScanItem } from '@/providers/scan-provider';
 import { useScanSession } from '@/providers/scan-provider';
 import { useSettings } from '@/providers/settings-provider';
 
 type SendState = 'idle' | 'sending' | 'success' | 'error';
-const CHUNK_SIZE = 20;
+const CHUNK_SIZE = 300;
 
 const toPayloadScan = (scan: ScanItem) => ({
   id: scan.id,

@@ -315,8 +315,8 @@ export const UpdateChecker = () => {
   const isInstalling = downloadState === 'installing';
   
   const downloadLabel = downloadProgress != null
-    ? `Скачано ${Math.round(downloadProgress * 100)}%`
-    : 'Скачиваю обновление…';
+    ? `Downloaded ${Math.round(downloadProgress * 100)}%`
+    : 'Downloading update…';
 
   return (
     <View style={styles.container} pointerEvents="box-none">
@@ -324,7 +324,7 @@ export const UpdateChecker = () => {
         <View style={styles.header}>
           <View style={styles.titleRow}>
             <ThemedText type="subtitle" style={styles.title}>
-              Новая версия {release.version} уже готова
+              New version {release.version} avalaible!
             </ThemedText>
             <Pressable onPress={handleDismiss} style={styles.closeButton}>
               <ThemedText style={styles.closeText}>✕</ThemedText>
@@ -342,16 +342,16 @@ export const UpdateChecker = () => {
             </View>
           ) : isReady ? (
             <Pressable style={styles.button} onPress={installApk}>
-              <ThemedText style={styles.buttonText}>Установи</ThemedText>
+              <ThemedText style={styles.buttonText}>Install</ThemedText>
             </Pressable>
           ) : isInstalling ? (
             <View style={styles.downloadRow}>
               <ActivityIndicator color="#fff" />
-              <ThemedText style={styles.statusText}>Запускаю установщик...</ThemedText>
+              <ThemedText style={styles.statusText}>Launching installer...</ThemedText>
             </View>
           ) : (
             <Pressable style={styles.button} onPress={downloadAndInstall}>
-              <ThemedText style={styles.buttonText}>Скачай</ThemedText>
+              <ThemedText style={styles.buttonText}>Download</ThemedText>
             </Pressable>
           )}
           {downloadState === 'error' && errorMessage ? (
