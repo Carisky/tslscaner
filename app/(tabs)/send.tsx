@@ -3,12 +3,14 @@ import { PropsWithChildren, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   Share,
   StyleSheet,
   TextInput,
+  View,
 } from 'react-native';
 
 import { buildScansUrl } from '@/api/client';
@@ -22,6 +24,11 @@ import { useSettings } from '@/providers/settings-provider';
 
 type SendState = 'idle' | 'sending' | 'success' | 'error';
 const CHUNK_SIZE = 300;
+type TargetType = 'prisma' | 'train';
+const TARGET_OPTIONS: { id: TargetType; label: string }[] = [
+  { id: 'prisma', label: 'Prisma' },
+  { id: 'train', label: 'Train' },
+];
 
 const toPayloadScan = (scan: ScanItem) => ({
   id: scan.id,
@@ -36,7 +43,9 @@ export default function SendScreen() {
   const { items, itemsCount, folders } = useScanSession();
   const { serverBaseUrl, apiKey } = useSettings();
   const [comment, setComment] = useState('');
-  const [prisma, setPrisma] = useState('');
+  const [targetType, setTargetType] = useState<TargetType>('prisma');
+  const [targetValue, setTargetValue] = useState('');
+  const [isTargetPickerVisible, setTargetPickerVisible] = useState(false);
   const [state, setState] = useState<SendState>('idle');
   const [lastMessage, setLastMessage] = useState('');
   const [selectedSource, setSelectedSource] = useState<'buffer' | string>('buffer');
@@ -49,6 +58,7 @@ export default function SendScreen() {
   const activeCount = activeScans.length;
   const sourceLabel =
     selectedSource === 'buffer' ? 'Bufor tymczasowy' : selectedFolder?.name ?? 'Bufor tymczasowy';
+  const targetLabel = targetType === 'prisma' ? 'Prisma' : 'Train';
 
   useEffect(() => {
     if (selectedSource !== 'buffer' && !folders.some((folder) => folder.id === selectedSource)) {
@@ -75,11 +85,12 @@ export default function SendScreen() {
         app: Constants.expoConfig?.name ?? 'tslscaner',
       },
       comment: comment || undefined,
-      prisma: prisma || undefined,
+      prisma: targetType === 'prisma' ? targetValue || undefined : undefined,
+      train: targetType === 'train' ? targetValue || undefined : undefined,
       total: activeCount,
       scans: activeScans.map(toPayloadScan),
     }),
-    [activeCount, activeScans, comment, prisma],
+    [activeCount, activeScans, comment, targetType, targetValue],
   );
 
   const sendToEndpoint = async () => {
@@ -108,6 +119,7 @@ export default function SendScreen() {
           device: payload.device,
           comment: payload.comment,
           prisma: payload.prisma,
+          train: payload.train,
           total: activeCount,
           scans: batches[batchIndex].map(toPayloadScan),
         };
@@ -172,11 +184,16 @@ export default function SendScreen() {
           <Card>
             <ThemedText type="subtitle">Cel wysylki</ThemedText>
 
-            <ThemedText style={styles.fieldLabel}>Prisma (opcjonalnie)</ThemedText>
+            <ThemedText style={styles.fieldLabel}>Typ pola docelowego</ThemedText>
+            <Pressable style={styles.targetSelector} onPress={() => setTargetPickerVisible(true)}>
+              <ThemedText style={styles.targetSelectorLabel}>{targetLabel}</ThemedText>
+              <ThemedText style={styles.targetSelectorArrow}>▾</ThemedText>
+            </Pressable>
+            <ThemedText style={styles.fieldLabel}>{targetLabel} (opcjonalnie)</ThemedText>
             <TextInput
-              value={prisma}
-              onChangeText={setPrisma}
-              placeholder="Prisma"
+              value={targetValue}
+              onChangeText={setTargetValue}
+              placeholder={targetLabel}
               style={styles.input}
             />
             <ThemedText style={styles.fieldLabel}>Komentarz</ThemedText>
@@ -191,9 +208,9 @@ export default function SendScreen() {
             <Pressable
               style={[
                 styles.button,
-              (state === 'sending' || !hasEndpoint) && styles.buttonDisabled,
-            ]}
-            disabled={state === 'sending' || !hasEndpoint}
+                (state === 'sending' || !hasEndpoint) && styles.buttonDisabled,
+              ]}
+              disabled={state === 'sending' || !hasEndpoint}
               onPress={sendToEndpoint}>
               <ThemedText style={styles.buttonText}>
                 {state === 'sending' ? 'Wysylanie...' : 'Wyslij'}
@@ -211,6 +228,32 @@ export default function SendScreen() {
           </Card>
         </ScrollView>
       </KeyboardAvoidingView>
+      <Modal
+        visible={isTargetPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTargetPickerVisible(false)}>
+        <View style={styles.modalRoot}>
+          <Pressable style={styles.modalOverlay} onPress={() => setTargetPickerVisible(false)} />
+          <ThemedView lightColor="#fff" darkColor="#1f2937" style={styles.modalCard}>
+            <ThemedText type="subtitle">Wybierz typ pola</ThemedText>
+            {TARGET_OPTIONS.map((option) => (
+              <Pressable
+                key={option.id}
+                onPress={() => {
+                  setTargetType(option.id);
+                  setTargetPickerVisible(false);
+                }}
+                style={[
+                  styles.modalOption,
+                  targetType === option.id && styles.modalOptionActive,
+                ]}>
+                <ThemedText style={styles.modalOptionLabel}>{option.label}</ThemedText>
+              </Pressable>
+            ))}
+          </ThemedView>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -277,6 +320,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
   },
+  targetSelector: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  targetSelectorLabel: {
+    fontSize: 16,
+    color: '#0a7ea4',
+  },
+  targetSelectorArrow: {
+    fontSize: 16,
+    color: '#6b7280',
+  },
   button: {
     marginTop: 16,
     borderRadius: 8,
@@ -311,6 +373,38 @@ const styles = StyleSheet.create({
   },
   success: {
     color: '#047857',
+  },
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  modalCard: {
+    width: '80%',
+    padding: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  modalOption: {
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  modalOptionActive: {
+    borderColor: '#0a7ea4',
+    backgroundColor: '#e0f2ff',
+  },
+  modalOptionLabel: {
+    fontSize: 16,
+    color: '#0a7ea4',
   },
   sampleText: {
     marginTop: 12,
