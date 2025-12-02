@@ -34,6 +34,16 @@ const TARGET_OPTIONS: { id: TargetType; label: string }[] = [
   { id: 'train', label: 'Train' },
 ];
 
+type SourceKind = 'buffer' | 'folder' | 'train' | 'wagon';
+type SourceOption = {
+  id: string;
+  label: string;
+  count: number;
+  kind: SourceKind;
+  folderId?: string;
+  wagonId?: string;
+};
+
 const toPayloadScan = (scan: ScanItem) => ({
   id: scan.id,
   code: scan.code,
@@ -56,6 +66,7 @@ type StoredChunk = {
   scans: ChunkPayload[];
   sent: boolean;
   createdAt: string;
+  wagonName?: string;
 };
 type StoredSendSession = {
   device: ScanChunkPayload['device'];
@@ -113,30 +124,92 @@ export default function SendScreen() {
   const scansEndpoint = useMemo(() => buildScansUrl(serverBaseUrl), [serverBaseUrl]);
   const hasEndpoint = Boolean(scansEndpoint);
 
-  const selectedFolder = folders.find((folder) => folder.id === selectedSource);
-  const activeScans = selectedSource === 'buffer' ? items : selectedFolder?.scans ?? items;
-  const activeCount = activeScans.length;
-  const sourceLabel =
-    selectedSource === 'buffer' ? 'Bufor tymczasowy' : selectedFolder?.name ?? 'Bufor tymczasowy';
   const targetLabel = targetType === 'prisma' ? 'Prisma' : 'Train';
 
-  useEffect(() => {
-    if (selectedSource !== 'buffer' && !folders.some((folder) => folder.id === selectedSource)) {
-      setSelectedSource('buffer');
-    }
-  }, [folders, selectedSource]);
-
-  const sourceOptions = useMemo(
-    () => [
-      { id: 'buffer', label: 'Bufor tymczasowy', count: itemsCount },
-      ...folders.map((folder) => ({
+  const sourceOptions = useMemo<SourceOption[]>(() => {
+    const initial: SourceOption[] = [
+      { id: 'buffer', label: 'Bufor tymczasowy', count: itemsCount, kind: 'buffer' },
+    ];
+    folders.forEach((folder) => {
+      if (folder.target === 'train') {
+        const trainCount = folder.wagons.reduce((acc, wagon) => acc + wagon.scans.length, 0);
+        initial.push({
+          id: `train:${folder.id}`,
+          label: folder.name,
+          count: trainCount,
+          kind: 'train',
+          folderId: folder.id,
+        });
+        folder.wagons.forEach((wagon) => {
+          initial.push({
+            id: `wagon:${folder.id}:${wagon.id}`,
+            label: `${folder.name} / ${wagon.name}`,
+            count: wagon.scans.length,
+            kind: 'wagon',
+            folderId: folder.id,
+            wagonId: wagon.id,
+          });
+        });
+        return;
+      }
+      initial.push({
         id: folder.id,
         label: folder.name,
         count: folder.scans.length,
-      })),
-    ],
-    [folders, itemsCount],
-  );
+        kind: 'folder',
+        folderId: folder.id,
+      });
+    });
+    return initial;
+  }, [folders, itemsCount]);
+
+  useEffect(() => {
+    if (!sourceOptions.some((option) => option.id === selectedSource)) {
+      setSelectedSource('buffer');
+    }
+  }, [sourceOptions, selectedSource]);
+
+  const selectedOption =
+    sourceOptions.find((option) => option.id === selectedSource) ?? sourceOptions[0];
+  const activeScans = useMemo(() => {
+    if (!selectedOption) {
+      return items;
+    }
+    if (selectedOption.kind === 'buffer') {
+      return items;
+    }
+    if (selectedOption.kind === 'folder') {
+      const folder = folders.find((folder) => folder.id === selectedOption.folderId);
+      return folder?.scans ?? [];
+    }
+    if (selectedOption.kind === 'wagon') {
+      const folder = folders.find((folder) => folder.id === selectedOption.folderId);
+      const wagon = folder?.wagons.find((wagon) => wagon.id === selectedOption.wagonId);
+      return wagon?.scans ?? [];
+    }
+    if (selectedOption.kind === 'train') {
+      const folder = folders.find((folder) => folder.id === selectedOption.folderId);
+      return folder ? folder.wagons.flatMap((wagon) => wagon.scans) : [];
+    }
+    return items;
+  }, [selectedOption, folders, items]);
+  const activeCount = activeScans.length;
+  const sourceLabel = selectedOption?.label ?? 'Bufor tymczasowy';
+
+  useEffect(() => {
+    if (!selectedOption || selectedOption.kind === 'buffer') {
+      return;
+    }
+    const folder = folders.find((folder) => folder.id === selectedOption.folderId);
+    if (!folder) {
+      return;
+    }
+    const nextTargetType = selectedOption.kind === 'folder' ? 'prisma' : 'train';
+    setTargetType(nextTargetType);
+    if (!targetValue) {
+      setTargetValue(folder.name);
+    }
+  }, [selectedOption, folders, targetValue]);
 
   const payload = useMemo(
     () => ({
@@ -152,6 +225,54 @@ export default function SendScreen() {
     }),
     [activeCount, activeScans, comment, targetType, targetValue],
   );
+
+  const buildChunksForSource = (sourceOption: SourceOption | undefined) => {
+    if (!sourceOption) {
+      return [];
+    }
+    if (sourceOption.kind === 'buffer' || sourceOption.kind === 'folder') {
+      return chunkArray(activeScans.map(toPayloadScan), CHUNK_SIZE).map((batch) => ({
+        scans: batch,
+        sent: false,
+        createdAt: new Date().toISOString(),
+      }));
+    }
+    if (sourceOption.kind === 'wagon') {
+      const folder = folders.find((folder) => folder.id === sourceOption.folderId);
+      const wagon = folder?.wagons.find((wagon) => wagon.id === sourceOption.wagonId);
+      if (!wagon) {
+        return [];
+      }
+      return chunkArray(wagon.scans.map(toPayloadScan), CHUNK_SIZE).map((batch) => ({
+        scans: batch,
+        sent: false,
+        createdAt: new Date().toISOString(),
+        wagonName: wagon.name,
+      }));
+    }
+    if (sourceOption.kind === 'train') {
+      const folder = folders.find((folder) => folder.id === sourceOption.folderId);
+      if (!folder) {
+        return [];
+      }
+      const chunks: StoredChunk[] = [];
+      folder.wagons.forEach((wagon) => {
+        if (!wagon.scans.length) {
+          return;
+        }
+        chunkArray(wagon.scans.map(toPayloadScan), CHUNK_SIZE).forEach((batch) => {
+          chunks.push({
+            scans: batch,
+            sent: false,
+            createdAt: new Date().toISOString(),
+            wagonName: wagon.name,
+          });
+        });
+      });
+      return chunks;
+    }
+    return [];
+  };
 
   const sendToEndpoint = async () => {
     if (!hasEndpoint) {
@@ -179,7 +300,7 @@ export default function SendScreen() {
           return;
         }
 
-        const chunkedScans = chunkArray(activeScans.map(toPayloadScan), CHUNK_SIZE);
+        const chunkedScans = buildChunksForSource(selectedOption);
         session = {
           device: payload.device,
           comment: payload.comment,
@@ -188,11 +309,7 @@ export default function SendScreen() {
           total: payload.total,
           chunkSize: CHUNK_SIZE,
           createdAt: new Date().toISOString(),
-          chunks: chunkedScans.map((batch) => ({
-            scans: batch,
-            sent: false,
-            createdAt: new Date().toISOString(),
-          })),
+          chunks: chunkedScans,
         };
         storedSessions[sourceKey] = session;
         await saveSendSessions(storedSessions);
@@ -227,6 +344,7 @@ export default function SendScreen() {
           comment: session.comment,
           prisma: session.prisma,
           train: session.train,
+          wagon: chunk.wagonName,
           total: session.total,
           scans: chunk.scans,
         };

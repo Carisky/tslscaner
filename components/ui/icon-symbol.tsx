@@ -23,6 +23,7 @@ const MAPPING = {
   'list.bullet': 'format-list-bulleted',
   'chart.bar.fill': 'stacked-bar-chart',
   'tram.fill': 'train',
+  'gearshape': 'settings',
 } as IconMapping;
 
 /**

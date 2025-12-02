@@ -35,6 +35,7 @@ type SecureAccessState = 'unknown' | 'missing_signature' | 'registering' | 'gran
 
 type ScanStatus = 'idle' | 'listening' | 'unsupported' | 'error';
 
+export type FolderTarget = 'prisma' | 'train';
 type ScanContextValue = {
   items: ScanItem[];
   folders: ScanFolder[];
@@ -45,13 +46,20 @@ type ScanContextValue = {
   clearAll: () => void;
   softTrigger: (mode?: 'start' | 'stop' | 'toggle') => void;
   itemsCount: number;
-  createFolder: (name: string) => ScanFolder | null;
+  createFolder: (name: string, target?: FolderTarget) => ScanFolder | null;
   renameFolder: (folderId: string, name: string) => void;
   deleteFolder: (folderId: string) => void;
   moveScanToFolder: (folderId: string, scan: ScanItem) => void;
   clearFolder: (folderId: string) => void;
   removeFolderScan: (folderId: string, scanId: string) => void;
   moveBufferToFolder: (folderId: string) => void;
+  createWagon: (folderId: string, name: string) => ScanWagon | null;
+  renameWagon: (folderId: string, wagonId: string, name: string) => void;
+  deleteWagon: (folderId: string, wagonId: string) => void;
+  clearWagon: (folderId: string, wagonId: string) => void;
+  moveScanToWagon: (folderId: string, wagonId: string, scan: ScanItem) => void;
+  removeWagonScan: (folderId: string, wagonId: string, scanId: string) => void;
+  moveBufferToWagon: (folderId: string, wagonId: string) => void;
 };
 
 export type ScanItem = {
@@ -64,7 +72,7 @@ export type ScanItem = {
   rawIntent?: Record<string, unknown>;
 };
 
-export type ScanFolder = {
+export type ScanWagon = {
   id: string;
   name: string;
   createdAt: string;
@@ -72,14 +80,34 @@ export type ScanFolder = {
   scans: ScanItem[];
 };
 
+export type ScanFolder = {
+  id: string;
+  name: string;
+  target: FolderTarget;
+  createdAt: string;
+  updatedAt: string;
+  scans: ScanItem[];
+  wagons: ScanWagon[];
+};
+
 type PersistentScanItem = Omit<ScanItem, 'rawIntent'>;
 
-type PersistedFolder = {
+type PersistedWagon = {
   id: string;
   name: string;
   createdAt: string;
   updatedAt: string;
   scans: PersistentScanItem[];
+};
+
+type PersistedFolder = {
+  id: string;
+  name: string;
+  target?: FolderTarget;
+  createdAt: string;
+  updatedAt: string;
+  scans: PersistentScanItem[];
+  wagons?: PersistedWagon[];
 };
 
 type PersistedState = {
@@ -104,6 +132,13 @@ const defaultContext: ScanContextValue = {
   clearFolder: () => undefined,
   removeFolderScan: () => undefined,
   moveBufferToFolder: () => undefined,
+  createWagon: () => null,
+  renameWagon: () => undefined,
+  deleteWagon: () => undefined,
+  clearWagon: () => undefined,
+  moveScanToWagon: () => undefined,
+  removeWagonScan: () => undefined,
+  moveBufferToWagon: () => undefined,
 };
 
 const ScanContext = createContext<ScanContextValue>(defaultContext);
@@ -111,6 +146,7 @@ const ScanContext = createContext<ScanContextValue>(defaultContext);
 const pad = (input: number) => input.toString().padStart(2, '0');
 const buildFriendlyName = (date: Date) => `scan_${pad(date.getDate())}_${pad(date.getHours())}`;
 const buildFolderId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+const buildWagonId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
 const isPersistentScanItem = (value: unknown): value is PersistentScanItem => {
   if (typeof value !== 'object' || value === null) {
@@ -132,6 +168,28 @@ const hydratePersistentScans = (value: unknown): ScanItem[] => {
   return value.filter(isPersistentScanItem).map((scan) => ({ ...scan }));
 };
 
+const hydratePersistentWagon = (value: unknown): ScanWagon | null => {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  const entry = value as PersistedWagon & { name?: string };
+  if (
+    typeof entry.id !== 'string' ||
+    typeof entry.name !== 'string' ||
+    typeof entry.createdAt !== 'string' ||
+    typeof entry.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    id: entry.id,
+    name: entry.name,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    scans: hydratePersistentScans(entry.scans),
+  };
+};
+
 const hydratePersistentFolders = (value: unknown): ScanFolder[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -150,12 +208,21 @@ const hydratePersistentFolders = (value: unknown): ScanFolder[] => {
       ) {
         return null;
       }
+      const target: FolderTarget = entry.target === 'train' ? 'train' : 'prisma';
+      const wagons =
+        Array.isArray(entry.wagons)
+          ? entry.wagons
+              .map((wagon) => hydratePersistentWagon(wagon))
+              .filter((wagon): wagon is ScanWagon => wagon !== null)
+          : [];
       return {
         id: entry.id,
         name: entry.name,
+        target,
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
         scans: hydratePersistentScans(entry.scans),
+        wagons,
       };
     })
     .filter((folder): folder is ScanFolder => folder !== null);
@@ -403,14 +470,20 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
     setItems((prev) => [item, ...prev]);
   }, []);
 
-  const createFolder = useCallback((name: string) => {
+  const createFolder = useCallback((name: string, target: FolderTarget = 'prisma') => {
     const trimmed = name.trim();
-    const folderName = trimmed.length ? trimmed : `Folder ${new Date().toLocaleDateString()}`;
+    const fallbackName =
+      target === 'train'
+        ? `Pociąg ${new Date().toLocaleDateString()}`
+        : `Folder ${new Date().toLocaleDateString()}`;
+    const folderName = trimmed.length ? trimmed : fallbackName;
     const timestamp = new Date().toISOString();
     const newFolder: ScanFolder = {
       id: buildFolderId(),
       name: folderName,
+      target,
       scans: [],
+      wagons: [],
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -438,11 +511,22 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
 
   const clearFolder = useCallback((id: string) => {
     setFolders((prev) =>
-      prev.map((folder) =>
-        folder.id === id
-          ? { ...folder, scans: [], updatedAt: new Date().toISOString() }
-          : folder,
-      ),
+      prev.map((folder) => {
+        if (folder.id !== id) {
+          return folder;
+        }
+        const timestamp = new Date().toISOString();
+        return {
+          ...folder,
+          scans: [],
+          updatedAt: timestamp,
+          wagons: folder.wagons.map((wagon) => ({
+            ...wagon,
+            scans: [],
+            updatedAt: timestamp,
+          })),
+        };
+      }),
     );
   }, []);
 
@@ -471,6 +555,138 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
     );
   }, []);
 
+  const createWagon = useCallback((folderId: string, name: string) => {
+    const trimmed = name.trim();
+    const fallbackName = `Wagon ${new Date().toLocaleDateString()}`;
+    const wagonName = trimmed.length ? trimmed : fallbackName;
+    let createdWagon: ScanWagon | null = null;
+    const timestamp = new Date().toISOString();
+    setFolders((prev) =>
+      prev.map((folder) => {
+        if (folder.id !== folderId || folder.target !== 'train') {
+          return folder;
+        }
+        const newWagon: ScanWagon = {
+          id: buildWagonId(),
+          name: wagonName,
+          scans: [],
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        createdWagon = newWagon;
+        return {
+          ...folder,
+          wagons: [newWagon, ...folder.wagons],
+          updatedAt: timestamp,
+        };
+      }),
+    );
+    return createdWagon;
+  }, []);
+
+  const renameWagon = useCallback((folderId: string, wagonId: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return;
+    }
+    setFolders((prev) =>
+      prev.map((folder) => {
+        if (folder.id !== folderId || folder.target !== 'train') {
+          return folder;
+        }
+        return {
+          ...folder,
+          wagons: folder.wagons.map((wagon) =>
+            wagon.id === wagonId
+              ? { ...wagon, name: trimmed, updatedAt: new Date().toISOString() }
+              : wagon,
+          ),
+          updatedAt: new Date().toISOString(),
+        };
+      }),
+    );
+  }, []);
+
+  const deleteWagon = useCallback((folderId: string, wagonId: string) => {
+    setFolders((prev) =>
+      prev.map((folder) => {
+        if (folder.id !== folderId || folder.target !== 'train') {
+          return folder;
+        }
+        return {
+          ...folder,
+          wagons: folder.wagons.filter((wagon) => wagon.id !== wagonId),
+          updatedAt: new Date().toISOString(),
+        };
+      }),
+    );
+  }, []);
+
+  const clearWagon = useCallback((folderId: string, wagonId: string) => {
+    setFolders((prev) =>
+      prev.map((folder) => {
+        if (folder.id !== folderId || folder.target !== 'train') {
+          return folder;
+        }
+        return {
+          ...folder,
+          wagons: folder.wagons.map((wagon) =>
+            wagon.id === wagonId
+              ? { ...wagon, scans: [], updatedAt: new Date().toISOString() }
+              : wagon,
+          ),
+          updatedAt: new Date().toISOString(),
+        };
+      }),
+    );
+  }, []);
+
+  const moveScanToWagon = useCallback(
+    (folderId: string, wagonId: string, scan: ScanItem) => {
+      setItems((prev) => prev.filter((item) => item.id !== scan.id));
+      setFolders((prev) =>
+        prev.map((folder) => {
+          if (folder.id !== folderId || folder.target !== 'train') {
+            return folder;
+          }
+          return {
+            ...folder,
+            wagons: folder.wagons.map((wagon) =>
+              wagon.id === wagonId
+                ? { ...wagon, scans: [scan, ...wagon.scans], updatedAt: new Date().toISOString() }
+                : wagon,
+            ),
+            updatedAt: new Date().toISOString(),
+          };
+        }),
+      );
+    },
+    [],
+  );
+
+  const removeWagonScan = useCallback((folderId: string, wagonId: string, scanId: string) => {
+    setFolders((prev) =>
+      prev.map((folder) => {
+        if (folder.id !== folderId || folder.target !== 'train') {
+          return folder;
+        }
+        return {
+          ...folder,
+          wagons: folder.wagons.map((wagon) =>
+            wagon.id === wagonId
+              ? {
+                  ...wagon,
+                  scans: wagon.scans.filter((scan) => scan.id !== scanId),
+                  updatedAt: new Date().toISOString(),
+                }
+              : wagon,
+          ),
+          updatedAt: new Date().toISOString(),
+        };
+      }),
+    );
+  }, []);
+
   const moveBufferToFolder = useCallback((folderId: string) => {
     setItems((prevBuffer) => {
       if (!prevBuffer.length) {
@@ -486,6 +702,35 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
               }
             : folder,
         ),
+      );
+      return [];
+    });
+  }, []);
+
+  const moveBufferToWagon = useCallback((folderId: string, wagonId: string) => {
+    setItems((prevBuffer) => {
+      if (!prevBuffer.length) {
+        return prevBuffer;
+      }
+      setFolders((prevFolders) =>
+        prevFolders.map((folder) => {
+          if (folder.id !== folderId || folder.target !== 'train') {
+            return folder;
+          }
+          return {
+            ...folder,
+            wagons: folder.wagons.map((wagon) =>
+              wagon.id === wagonId
+                ? {
+                    ...wagon,
+                    scans: [...prevBuffer, ...wagon.scans],
+                    updatedAt: new Date().toISOString(),
+                  }
+                : wagon,
+            ),
+            updatedAt: new Date().toISOString(),
+          };
+        }),
       );
       return [];
     });
@@ -653,9 +898,13 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
     if (!hydrated) return;
     const persist = async () => {
       try {
-        const folderPayload = folders.map(({ scans, ...rest }) => ({
+        const folderPayload = folders.map(({ scans, wagons, ...rest }) => ({
           ...rest,
           scans: scans.map(({ rawIntent, ...item }) => item),
+          wagons: (wagons ?? []).map(({ scans: wagonScans, ...wagonRest }) => ({
+            ...wagonRest,
+            scans: wagonScans.map(({ rawIntent, ...item }) => item),
+          })),
         }));
         const payload: PersistedState = {
           buffer: items.map(({ rawIntent, ...rest }) => rest),
@@ -782,7 +1031,14 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
       moveScanToFolder,
       clearFolder,
       removeFolderScan,
+      createWagon,
+      renameWagon,
+      deleteWagon,
+      clearWagon,
+      moveScanToWagon,
+      removeWagonScan,
       moveBufferToFolder,
+      moveBufferToWagon,
     }),
     [
       clearAll,
@@ -799,6 +1055,13 @@ export const ScanProvider = ({ children }: PropsWithChildren) => {
       renameFolder,
       softTrigger,
       status,
+      createWagon,
+      renameWagon,
+      deleteWagon,
+      clearWagon,
+      moveScanToWagon,
+      removeWagonScan,
+      moveBufferToWagon,
     ],
   );
 

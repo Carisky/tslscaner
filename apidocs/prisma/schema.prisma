@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Scan {
+  id           String   @id @default(cuid())
+  scanId       String?
+  deviceId     String
+  deviceApp    String
+  labelType    String
+  friendlyName String
+  timestamp    DateTime
+  source       String
+  code         String
+  segments     Json
+  comment      String?
+  prismaName   String?
+  trainName    String?
+  wagonName    String?
+  createdAt    DateTime @default(now())
+}
+
+model PrismaSummary {
+  name        String   @id
+  totalCount  Int      @default(0)
+  factScanned Int      @default(0)
+  updatedAt   DateTime @updatedAt
+}
+
+model TrainSummary {
+  name       String   @id
+  totalCount Int      @default(0)
+  factLoaded Int      @default(0)
+  updatedAt  DateTime @updatedAt
+}
+
+model Producent {
+  barcode      String   @id
+  grade        String?
+  size         String?
+  heatNo       String?
+  rollingNo    String?
+  markNo       String?
+  actualWeight Float?
+  pieces       Int?
+  scaned       Int      @default(0)
+  onTrain      Int      @default(0)
+  trainName    String?
+  wagonName    String?
+  updatedAt    DateTime @updatedAt
+}

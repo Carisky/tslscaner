@@ -9,6 +9,7 @@ export type ScanChunkPayload = {
   comment?: string;
   prisma?: string;
   train?: string;
+  wagon?: string;
   total: number;
   scans: ScanItem[];
 };

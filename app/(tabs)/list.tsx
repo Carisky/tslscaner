@@ -13,28 +13,42 @@ import type { AlertButton } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { useScanSession, type ScanItem } from '@/providers/scan-provider';
+import { useScanSession, type ScanItem, type FolderTarget } from '@/providers/scan-provider';
+
+const FOLDER_TARGET_OPTIONS: { id: FolderTarget; label: string }[] = [
+  { id: 'prisma', label: 'Prisma' },
+  { id: 'train', label: 'Pociąg' },
+];
 
 export default function ListScreen() {
     const {
       items,
       itemsCount,
-      clearAll,
-      removeById,
-      folders,
-      createFolder,
-      moveScanToFolder,
-      removeFolderScan,
-      clearFolder,
-      deleteFolder,
-      moveBufferToFolder,
+    clearAll,
+    removeById,
+    folders,
+    createFolder,
+    moveScanToFolder,
+    removeFolderScan,
+    clearFolder,
+    deleteFolder,
+    moveBufferToFolder,
+    createWagon,
+    clearWagon,
+    deleteWagon,
+    moveBufferToWagon,
+    removeWagonScan,
     } = useScanSession();
 
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [isFolderPickerVisible, setFolderPickerVisible] = useState(false);
   const [isFolderModalVisible, setFolderModalVisible] = useState(false);
   const [folderDraft, setFolderDraft] = useState('');
+  const [folderTarget, setFolderTarget] = useState<FolderTarget>('prisma');
   const [pendingScan, setPendingScan] = useState<ScanItem | null>(null);
+  const [activeWagonId, setActiveWagonId] = useState<string | null>(null);
+  const [isWagonModalVisible, setWagonModalVisible] = useState(false);
+  const [wagonDraft, setWagonDraft] = useState('');
 
   const activeFolder = useMemo(
     () => folders.find((folder) => folder.id === activeFolderId) ?? null,
@@ -47,9 +61,33 @@ export default function ListScreen() {
     }
   }, [activeFolderId, folders]);
 
-  const displayItems = activeFolder ? activeFolder.scans : items;
+  useEffect(() => {
+    if (!activeFolder || activeFolder.target !== 'train') {
+      setActiveWagonId(null);
+      return;
+    }
+    if (activeWagonId && activeFolder.wagons.some((wagon) => wagon.id === activeWagonId)) {
+      return;
+    }
+    setActiveWagonId(activeFolder.wagons[0]?.id ?? null);
+  }, [activeFolder, activeWagonId]);
+
+  const activeWagon =
+    activeFolder && activeFolder.target === 'train' && activeWagonId
+      ? activeFolder.wagons.find((wagon) => wagon.id === activeWagonId) ?? null
+      : null;
+  const displayItems = activeWagon ? activeWagon.scans : activeFolder ? activeFolder.scans : items;
   const displayCount = displayItems.length;
-  const headerTitle = activeFolder ? activeFolder.name : 'Lista';
+  const headerTitle = activeWagon
+    ? `${activeFolder?.name} • ${activeWagon.name}`
+    : activeFolder
+      ? activeFolder.name
+      : 'Lista';
+  const canMoveBuffer =
+    Boolean(activeFolder) &&
+    itemsCount > 0 &&
+    (activeFolder?.target !== 'train' || Boolean(activeWagon));
+  const prismaFolders = folders.filter((folder) => folder.target === 'prisma');
 
   const openFolderPicker = (scan: ScanItem) => {
     setPendingScan(scan);
@@ -58,7 +96,9 @@ export default function ListScreen() {
 
   const handleItemAction = (item: ScanItem) => {
     const removeAction = () => {
-      if (activeFolder) {
+      if (activeWagon && activeFolder) {
+        removeWagonScan(activeFolder.id, activeWagon.id, item.id);
+      } else if (activeFolder) {
         removeFolderScan(activeFolder.id, item.id);
       } else {
         removeById(item.id);
@@ -87,6 +127,21 @@ export default function ListScreen() {
 
   const handleClear = () => {
     if (!displayCount) return;
+    if (activeWagon && activeFolder) {
+      Alert.alert(
+        'Wyczyść wagon',
+        `Usunąć wszystkie skany z wagonu ${activeWagon.name}?`,
+        [
+          { text: 'Anuluj', style: 'cancel' },
+          {
+            text: 'Wyczyść wagon',
+            style: 'destructive',
+            onPress: () => clearWagon(activeFolder.id, activeWagon.id),
+          },
+        ],
+      );
+      return;
+    }
     Alert.alert(
       activeFolder ? 'Wyczyść folder' : 'Wyczyść listę',
       activeFolder
@@ -111,6 +166,23 @@ export default function ListScreen() {
 
   const handleMoveBufferToFolder = () => {
     if (!activeFolder || !itemsCount) {
+      return;
+    }
+    if (activeFolder.target === 'train') {
+      if (!activeWagon) {
+        return;
+      }
+      Alert.alert(
+        'Przenieść bufor',
+        `Zapisz ${itemsCount} skanów w wagonie ${activeWagon.name}?`,
+        [
+          { text: 'Anuluj', style: 'cancel' },
+          {
+            text: 'Przenieś',
+            onPress: () => moveBufferToWagon(activeFolder.id, activeWagon.id),
+          },
+        ],
+      );
       return;
     }
     Alert.alert(
@@ -142,6 +214,7 @@ export default function ListScreen() {
   const handleCreateFolderPress = () => {
     setPendingScan(null);
     setFolderDraft('');
+    setFolderTarget('prisma');
     setFolderModalVisible(true);
   };
 
@@ -151,7 +224,7 @@ export default function ListScreen() {
       Alert.alert('Podaj nazwę folderu');
       return;
     }
-    const created = createFolder(trimmed);
+    const created = createFolder(trimmed, folderTarget);
     setFolderModalVisible(false);
     setFolderDraft('');
     if (created) {
@@ -183,6 +256,51 @@ export default function ListScreen() {
     ]);
   };
 
+  const handleAddWagonPress = () => {
+    setWagonDraft('');
+    setWagonModalVisible(true);
+  };
+
+  const handleCreateWagon = () => {
+    if (!activeFolder) {
+      return;
+    }
+    const trimmed = wagonDraft.trim();
+    if (!trimmed.length) {
+      Alert.alert('Podaj nazwę wagonu');
+      return;
+    }
+    const created = createWagon(activeFolder.id, trimmed);
+    setWagonModalVisible(false);
+    setWagonDraft('');
+    if (created) {
+      setActiveWagonId(created.id);
+    }
+  };
+
+  const handleWagonLongPress = (wagonId: string, wagonName: string) => {
+    if (!activeFolder) {
+      return;
+    }
+    Alert.alert(wagonName, 'Co chcesz zrobić z wagonem?', [
+      { text: 'Anuluj', style: 'cancel' },
+      {
+        text: 'Wyczyść wagon',
+        onPress: () => clearWagon(activeFolder.id, wagonId),
+      },
+      {
+        text: 'Usuń wagon',
+        style: 'destructive',
+        onPress: () => {
+          if (activeWagonId === wagonId) {
+            setActiveWagonId(null);
+          }
+          deleteWagon(activeFolder.id, wagonId);
+        },
+      },
+    ]);
+  };
+
   return (
     <ThemedView style={styles.container}>
       <View style={styles.header}>
@@ -203,23 +321,60 @@ export default function ListScreen() {
           <ThemedText style={styles.folderChipLabel}>Bufor</ThemedText>
           <ThemedText style={styles.folderChipCount}>{itemsCount}</ThemedText>
         </Pressable>
-        {folders.map((folder) => (
-          <Pressable
-            key={folder.id}
-            onPress={() => setActiveFolderId(folder.id)}
-            onLongPress={() => handleFolderLongPress(folder.id, folder.name)}
-            style={[
-              styles.folderChip,
-              activeFolder?.id === folder.id && styles.folderChipActive,
-            ]}>
-            <ThemedText style={styles.folderChipLabel}>{folder.name}</ThemedText>
-            <ThemedText style={styles.folderChipCount}>{folder.scans.length}</ThemedText>
-          </Pressable>
-        ))}
+        {folders.map((folder) => {
+          const scanCount =
+            folder.target === 'train'
+              ? folder.wagons.reduce((acc, wagon) => acc + wagon.scans.length, 0)
+              : folder.scans.length;
+          return (
+            <Pressable
+              key={folder.id}
+              onPress={() => setActiveFolderId(folder.id)}
+              onLongPress={() => handleFolderLongPress(folder.id, folder.name)}
+              style={[
+                styles.folderChip,
+                activeFolder?.id === folder.id && styles.folderChipActive,
+              ]}>
+              <ThemedText style={styles.folderChipLabel}>{folder.name}</ThemedText>
+              <ThemedText style={styles.folderChipMeta}>
+                {folder.target === 'train' ? 'Pociąg' : 'Prisma'}
+              </ThemedText>
+              <ThemedText style={styles.folderChipCount}>{scanCount}</ThemedText>
+            </Pressable>
+          );
+        })}
         <Pressable onPress={handleCreateFolderPress} style={[styles.folderChip, styles.folderChipNew]}>
           <ThemedText style={styles.folderChipLabel}>+ Nowy folder</ThemedText>
         </Pressable>
       </ScrollView>
+
+      {activeFolder?.target === 'train' && (
+        <View style={styles.wagonSection}>
+          <ThemedText type="subtitle">Wagony</ThemedText>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.wagonRow}
+            contentContainerStyle={styles.folderRowContent}>
+            {activeFolder.wagons.map((wagon) => (
+              <Pressable
+                key={wagon.id}
+                onPress={() => setActiveWagonId(wagon.id)}
+                onLongPress={() => handleWagonLongPress(wagon.id, wagon.name)}
+                style={[
+                  styles.folderChip,
+                  activeWagon?.id === wagon.id && styles.folderChipActive,
+                ]}>
+                <ThemedText style={styles.folderChipLabel}>{wagon.name}</ThemedText>
+                <ThemedText style={styles.folderChipCount}>{wagon.scans.length}</ThemedText>
+              </Pressable>
+            ))}
+            <Pressable onPress={handleAddWagonPress} style={[styles.folderChip, styles.folderChipNew]}>
+              <ThemedText style={styles.folderChipLabel}>+ Nowy wagon</ThemedText>
+            </Pressable>
+          </ScrollView>
+        </View>
+      )}
 
       <View style={styles.actions}>
         <Pressable
@@ -230,10 +385,10 @@ export default function ListScreen() {
         </Pressable>
         <Pressable
           onPress={handleMoveBufferToFolder}
-          disabled={!activeFolder || !itemsCount}
+          disabled={!canMoveBuffer}
           style={[
             styles.moveButton,
-            (!activeFolder || !itemsCount) && styles.moveButtonDisabled,
+            !canMoveBuffer && styles.moveButtonDisabled,
             styles.actionButton,
           ]}>
           <ThemedText style={styles.moveButtonText}>Przenieś bufor</ThemedText>
@@ -263,7 +418,11 @@ export default function ListScreen() {
         ListEmptyComponent={
           <ThemedText style={styles.emptyText}>
             {activeFolder
-              ? 'Brak skanów w folderze. Dodaj je z zakładki Skaner lub bufora.'
+              ? activeFolder.target === 'train'
+                ? activeWagon
+                  ? `Brak skanów w wagonie ${activeWagon.name}. Dodaj je z zakładki Skaner lub bufora.`
+                  : 'Wybierz wagon lub utwórz nowy, aby zgromadzić skany.'
+                : 'Brak skanów w folderze. Dodaj je z zakładki Skaner lub bufora.'
               : 'Brak wpisów. Przejdź do zakładki Skaner i zeskanuj kod.'}
           </ThemedText>
         }
@@ -280,19 +439,23 @@ export default function ListScreen() {
             <ThemedText type="subtitle">Zapisz skan</ThemedText>
             <ThemedText style={styles.modalHelper}>Wybierz folder docelowy</ThemedText>
             <ScrollView style={styles.modalList}>
-              {folders.length ? (
-                folders.map((folder) => (
-                  <Pressable
-                    key={folder.id}
-                    onPress={() => handleFolderSelected(folder.id)}
-                    style={styles.modalOption}>
-                    <ThemedText style={styles.modalOptionLabel}>{folder.name}</ThemedText>
-                    <ThemedText style={styles.modalMeta}>{folder.scans.length} skanów</ThemedText>
-                  </Pressable>
-                ))
-              ) : (
-                <ThemedText style={styles.modalHelper}>Brak folderów. Utwórz nowy.</ThemedText>
-              )}
+            {prismaFolders.length ? (
+              prismaFolders.map((folder) => (
+                <Pressable
+                  key={folder.id}
+                  onPress={() => handleFolderSelected(folder.id)}
+                  style={styles.modalOption}>
+                  <ThemedText style={styles.modalOptionLabel}>{folder.name}</ThemedText>
+                  <ThemedText style={styles.modalMeta}>
+                    {folder.scans.length} skanów
+                  </ThemedText>
+                </Pressable>
+              ))
+            ) : (
+              <ThemedText style={styles.modalHelper}>
+                Brak folderów Prismy. Utwórz nowy.
+              </ThemedText>
+            )}
             </ScrollView>
             <Pressable
               onPress={() => {
@@ -326,6 +489,30 @@ export default function ListScreen() {
           />
           <View style={styles.modalCard}>
             <ThemedText type="subtitle">Nowy folder</ThemedText>
+            <View style={styles.folderTargetRow}>
+              {FOLDER_TARGET_OPTIONS.map((option) => (
+                <Pressable
+                  key={option.id}
+                  onPress={() => setFolderTarget(option.id)}
+                  style={[
+                    styles.targetOption,
+                    folderTarget === option.id && styles.targetOptionActive,
+                  ]}>
+                  <ThemedText
+                    style={[
+                      styles.targetOptionLabel,
+                      folderTarget === option.id && styles.targetOptionLabelActive,
+                    ]}>
+                    {option.label}
+                  </ThemedText>
+                </Pressable>
+              ))}
+            </View>
+            <ThemedText style={styles.modalHelper}>
+              {folderTarget === 'train'
+                ? 'Folder pociągu umożliwia dzielenie skanów na wagony.'
+                : 'Folder przypisany do Prismy.'}
+            </ThemedText>
             <TextInput
               value={folderDraft}
               onChangeText={setFolderDraft}
@@ -344,6 +531,47 @@ export default function ListScreen() {
                 <ThemedText style={styles.modalButtonText}>Anuluj</ThemedText>
               </Pressable>
               <Pressable onPress={handleCreateFolder} style={styles.modalButton}>
+                <ThemedText style={styles.modalButtonText}>Zapisz</ThemedText>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={isWagonModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setWagonModalVisible(false);
+          setWagonDraft('');
+        }}>
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={() => {
+              setWagonModalVisible(false);
+              setWagonDraft('');
+            }}
+          />
+          <View style={styles.modalCard}>
+            <ThemedText type="subtitle">Nowy wagon</ThemedText>
+            <TextInput
+              value={wagonDraft}
+              onChangeText={setWagonDraft}
+              placeholder="Nazwa wagonu"
+              style={styles.folderInput}
+              autoFocus
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => {
+                  setWagonModalVisible(false);
+                  setWagonDraft('');
+                }}
+                style={styles.modalButton}>
+                <ThemedText style={styles.modalButtonText}>Anuluj</ThemedText>
+              </Pressable>
+              <Pressable onPress={handleCreateWagon} style={styles.modalButton}>
                 <ThemedText style={styles.modalButtonText}>Zapisz</ThemedText>
               </Pressable>
             </View>
@@ -383,6 +611,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  wagonSection: {
+    marginTop: 12,
+  },
+  wagonRow: {
+    marginTop: 8,
+  },
   folderChip: {
     borderRadius: 12,
     paddingVertical: 8,
@@ -405,6 +639,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: 12,
     color: '#6b7280',
+  },
+  folderChipMeta: {
+    marginTop: 2,
+    fontSize: 10,
+    color: '#0a7ea4',
   },
   actions: {
     marginTop: 12,
@@ -535,6 +774,30 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     marginTop: 12,
+  },
+  folderTargetRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  targetOption: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  targetOptionActive: {
+    borderColor: '#0a7ea4',
+    backgroundColor: '#e0f2ff',
+  },
+  targetOptionLabel: {
+    fontSize: 12,
+    color: '#0a7ea4',
+  },
+  targetOptionLabelActive: {
+    fontWeight: '600',
   },
   modalActions: {
     marginTop: 12,
